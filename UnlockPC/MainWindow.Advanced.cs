@@ -114,7 +114,7 @@ public sealed partial class MainWindow
         var timer = Stopwatch.StartNew();
         bool alreadyConnected = false;
         long connectionRequestedAt = 0;
-        long firstConnectedAt = 0;
+        var firstConnection = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
         BluetoothConnectionStatus? finalConnectionStatus = null;
         GattSessionStatus? sessionStatus = null;
         long? requestLatencyMs = null;
@@ -131,42 +131,39 @@ public sealed partial class MainWindow
             {
                 void ObserveConnection(BluetoothLEDevice changedDevice, object? _)
                 {
-                    long requestedAt = Volatile.Read(ref connectionRequestedAt);
-                    if (requestedAt == 0 || changedDevice.ConnectionStatus != BluetoothConnectionStatus.Connected)
-                        return;
-
-                    long connectedAt = Stopwatch.GetTimestamp();
-                    if (Interlocked.CompareExchange(ref firstConnectedAt, connectedAt, 0) == 0 && !alreadyConnected)
-                    {
-                        double seconds = Stopwatch.GetElapsedTime(requestedAt, connectedAt).TotalSeconds;
-                        DispatcherQueue.TryEnqueue(() =>
-                        {
-                            if (!_isClosing && timer.IsRunning)
-                                ShowWatchConnectionTestStatus("已观察到连接",
-                                    $"{watch.Name} · 建立连接用时 {seconds:F2} 秒。正在继续观察连接。", InfoBarSeverity.Informational);
-                        });
-                    }
+                    if (Volatile.Read(ref connectionRequestedAt) != 0 &&
+                        changedDevice.ConnectionStatus == BluetoothConnectionStatus.Connected)
+                        firstConnection.TrySetResult(Stopwatch.GetTimestamp());
                 }
 
                 device.ConnectionStatusChanged += ObserveConnection;
                 try
                 {
-                    using var session = await GattSession.FromDeviceIdAsync(device.BluetoothDeviceId).AsTask(deadline.Token);
-                    if (session?.CanMaintainConnection != true)
+                    alreadyConnected = device.ConnectionStatus == BluetoothConnectionStatus.Connected;
+                    using var session = alreadyConnected ? null :
+                        await GattSession.FromDeviceIdAsync(device.BluetoothDeviceId).AsTask(deadline.Token);
+                    alreadyConnected |= device.ConnectionStatus == BluetoothConnectionStatus.Connected;
+                    if (alreadyConnected)
+                    {
+                        finalConnectionStatus = BluetoothConnectionStatus.Connected;
+                    }
+                    else if (session?.CanMaintainConnection != true)
                     {
                         outcome = "maintain_unavailable";
                         message = "Windows 无法为这块设备请求维持连接。";
                     }
                     else
                     {
-                        alreadyConnected = device.ConnectionStatus == BluetoothConnectionStatus.Connected;
                         requestLatencyMs = timer.ElapsedMilliseconds;
                         BluetoothLog.Write("watch_connection_test_request", new { method = "maintain_connection", alreadyConnected });
                         Volatile.Write(ref connectionRequestedAt, Stopwatch.GetTimestamp());
                         session.MaintainConnection = true;
                         try
                         {
-                            await Task.Delay(TimeSpan.FromSeconds(10));
+                            // Check immediately as well as listening for changes during the connection request.
+                            ObserveConnection(device, null);
+                            try { await firstConnection.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+                            catch (TimeoutException) { }
                             sessionStatus = session.SessionStatus;
                         }
                         finally
@@ -174,7 +171,10 @@ public sealed partial class MainWindow
                             finalConnectionStatus = device.ConnectionStatus;
                             session.MaintainConnection = false;
                         }
-                        bool connected = alreadyConnected || Volatile.Read(ref firstConnectedAt) != 0 ||
+                    }
+                    if (alreadyConnected || connectionRequestedAt != 0)
+                    {
+                        bool connected = alreadyConnected || firstConnection.Task.IsCompletedSuccessfully ||
                             finalConnectionStatus == BluetoothConnectionStatus.Connected;
                         outcome = connected ? "connected" : "no_connection_observed";
                         message = connected ? "已观察到 Windows 连接状态。链路加密结果由 HCI 测试确认。"
@@ -200,7 +200,7 @@ public sealed partial class MainWindow
         finally
         {
             timer.Stop();
-            long connectedAt = Volatile.Read(ref firstConnectedAt);
+            long connectedAt = firstConnection.Task.IsCompletedSuccessfully ? firstConnection.Task.Result : 0;
             long requestedAt = Volatile.Read(ref connectionRequestedAt);
             TimeSpan? connectionLatency = !alreadyConnected && requestedAt != 0 && connectedAt != 0
                 ? Stopwatch.GetElapsedTime(requestedAt, connectedAt) : null;
@@ -217,9 +217,7 @@ public sealed partial class MainWindow
             {
                 string link = finalConnectionStatus switch
                 {
-                    BluetoothConnectionStatus.Connected => alreadyConnected
-                        ? "Windows 在测试前和测试结束时均报告已连接。"
-                        : "Windows 在测试结束时报告已连接。",
+                    BluetoothConnectionStatus.Connected => "Windows 报告已连接。",
                     BluetoothConnectionStatus.Disconnected => observedConnection
                         ? "Windows 曾报告已连接，测试结束时报告已断开。"
                         : "Windows 在测试期间未报告已连接。",
@@ -227,9 +225,9 @@ public sealed partial class MainWindow
                 };
                 string title = outcome == "connected" ? "已观察到连接" : "连接测试未通过";
                 string timing = connectionLatency is { } latency ? $"建立连接用时 {latency.TotalSeconds:F2} 秒。"
-                    : alreadyConnected ? "发起请求前已连接。" : "无新建连接用时。";
+                    : alreadyConnected ? "手表已连接，无需发起新连接。" : "无新建连接用时。";
                 ShowWatchConnectionTestStatus(title,
-                    $"{watch.Name} · {timing} 整轮用时 {timer.Elapsed.TotalSeconds:F1} 秒。{link} {message}", severity);
+                    $"{watch.Name} · {timing} 整轮用时 {timer.Elapsed.TotalSeconds:F2} 秒。{link} {message}", severity);
                 TestWatchConnectionButton.IsEnabled = true;
             }
         }

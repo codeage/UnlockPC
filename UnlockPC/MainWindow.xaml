@@ -324,7 +324,7 @@ SizeChanged="ContentScrollViewer_SizeChanged">
     <Border Style="{StaticResource SettingsCardStyle}">
         <StackPanel Spacing="8">
             <TextBlock Text="Apple Watch 蓝牙连接测试" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <TextBlock Text="向 Windows 请求连接在场检测页选中的手表，并观察 10 秒内的连接状态。"
+            <TextBlock Text="测试在场检测页选中的手表。确认连接后立即结束，等待新连接最多 10 秒。"
                        TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock x:Name="WatchConnectionLiveStatus" Text="当前连接（Windows）：未选择手表"
                        TextWrapping="Wrap" Style="{StaticResource BodyStrongTextBlockStyle}" />
