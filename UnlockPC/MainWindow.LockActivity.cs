@@ -24,15 +24,15 @@ public sealed partial class MainWindow
     private bool _lockActivityScrollPending;
     private LockActivitySpeech? _lockActivitySpeech;
 
-    private void UpdateLockActivityFooterVisibility()
+    private void UpdateWatchSidebarVisibility()
     {
-        LockActivityFooter.Visibility = RootNavigationView.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
-        if (LockActivityFooter.Visibility == Visibility.Visible)
+        WatchSidebar.Visibility = RootNavigationView.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        if (WatchSidebar.Visibility == Visibility.Visible)
             QueueLockActivityScroll();
     }
 
-    private void UpdateLockActivityFooterHeight(double paneHeight) =>
-        LockActivityFooter.Height = Math.Clamp(paneHeight - 190, 80, 320);
+    private void UpdateWatchSidebarHeight(double paneHeight) =>
+        WatchSidebar.Height = Math.Clamp(paneHeight - 190, 104, 600);
 
     private void RecordLockActivity(LockActivityEvent activity)
     {
@@ -97,7 +97,7 @@ public sealed partial class MainWindow
         _lockActivityScrollPending = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             _lockActivityScrollPending = false;
-            if (_isClosing || LockActivityFooter.Visibility != Visibility.Visible || LockActivityScroll.XamlRoot is null)
+            if (_isClosing || WatchSidebar.Visibility != Visibility.Visible || LockActivityScroll.XamlRoot is null)
                 return;
             WindowRootGrid.UpdateLayout();
             LockActivityScroll.ChangeView(null, LockActivityScroll.ScrollableHeight, null, disableAnimation: true);

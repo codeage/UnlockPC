@@ -25,10 +25,16 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("状态卡未正确显示截图中的 Nearby Info 字段。");
 
             Point origin = LockActivityFooter.TransformToVisual(WindowRootGrid).TransformPoint(new Point(0, 0));
+            Point watchOrigin = WatchBroadcastCard.TransformToVisual(WindowRootGrid).TransformPoint(new Point(0, 0));
             double bottom = origin.Y + LockActivityFooter.ActualHeight;
             if (origin.X < 0 || origin.X + LockActivityFooter.ActualWidth > RootNavigationView.OpenPaneLength + 1 ||
                 bottom < WindowRootGrid.ActualHeight - 36 || bottom > WindowRootGrid.ActualHeight)
                 throw new InvalidOperationException($"锁定与解锁记录未排在左下角（{origin.X:F0}, {origin.Y:F0}）。");
+
+            if (watchOrigin.Y < 0 || Math.Abs(watchOrigin.X - origin.X) > 1 ||
+                watchOrigin.Y + WatchBroadcastCard.ActualHeight >= origin.Y ||
+                WatchBroadcastScroll.ActualHeight <= 0)
+                throw new InvalidOperationException("手表状态位未在左侧过程记录上方独立滚动。");
 
             (byte Flags, string LockState)[] lockCases =
             [
@@ -59,7 +65,13 @@ public sealed partial class MainWindow
             AdvertisementRow.DescribeAppleMessages([0x10, 0x06, 0x09, 0xFF, 1, 2, 3, 4, 0x0B, 0x03, 0, 0, 0x3F], out var full);
             ShowWatchBroadcast(broadcast.Observe(full, now.AddSeconds(22), irkMatch: true), now.AddSeconds(22), scanning: true);
             if (WatchWatchUnlockFlagText.Text != "0x40 · 置位")
-                throw new InvalidOperationException("在场检测页未完整显示广播字段。");
+                throw new InvalidOperationException("左侧状态卡未完整显示广播字段。");
+
+            double sidebarHeight = WatchSidebar.Height;
+            WatchSidebar.Height = 250;
+            if (!await WaitForSelfTestAsync(() => WatchBroadcastScroll.ScrollableHeight > 0))
+                throw new InvalidOperationException("侧栏空间不足时无法滚动查看广播字段。");
+            WatchSidebar.Height = sidebarHeight;
 
             AdvertisementRow.DescribeAppleMessages([0x10, 0x05, 0x1A, 0x90], out var truncated);
             if (truncated != default)
@@ -80,8 +92,8 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("新增过程记录后没有滚动到末尾。");
 
             RootNavigationView.IsPaneOpen = false;
-            if (!await WaitForSelfTestAsync(() => LockActivityFooter.Visibility == Visibility.Collapsed))
-                throw new InvalidOperationException("导航栏收起后过程记录仍可见。");
+            if (!await WaitForSelfTestAsync(() => WatchSidebar.Visibility == Visibility.Collapsed))
+                throw new InvalidOperationException("导航栏收起后状态卡和过程记录仍可见。");
 
             BluetoothLog.Write("ui_self_test_passed", new { test = "watch-broadcast" });
             Environment.ExitCode = 0;

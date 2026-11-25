@@ -84,11 +84,11 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
         RootNavigationView.Loaded += (_, _) => FlattenNavContentChrome();
         RootNavigationView.DisplayModeChanged += (_, _) => FlattenNavContentChrome();
-        RootNavigationView.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => UpdateLockActivityFooterVisibility());
-        UpdateLockActivityFooterVisibility();
+        RootNavigationView.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => UpdateWatchSidebarVisibility());
+        UpdateWatchSidebarVisibility();
         RootNavigationView.SizeChanged += (_, args) =>
         {
-            UpdateLockActivityFooterHeight(args.NewSize.Height);
+            UpdateWatchSidebarHeight(args.NewSize.Height);
             var mode = args.NewSize.Width >= NavExpandThreshold
                 ? NavigationViewPaneDisplayMode.Left : NavigationViewPaneDisplayMode.LeftCompact;
             if (RootNavigationView.PaneDisplayMode == mode)

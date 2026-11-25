@@ -59,36 +59,104 @@ SelectionChanged="RootNavigationView_SelectionChanged">
 </NavigationView.MenuItems>
 
 <NavigationView.PaneFooter>
-    <Border x:Name="LockActivityFooter" Margin="12,0,12,12" Padding="12" CornerRadius="8"
-            Height="270" VerticalAlignment="Bottom"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-        <Grid RowSpacing="8">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-            <TextBlock Text="锁定与解锁记录" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <TextBlock x:Name="LockActivityEmptyText" Grid.Row="1" Text="暂无记录" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" />
-            <ScrollViewer x:Name="LockActivityScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
-                          AutomationProperties.Name="锁定与解锁过程记录">
-                <ItemsControl x:Name="LockActivityItems">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="local:LockActivityEntry">
-                            <StackPanel Margin="0,0,6,10" Spacing="2">
-                                <TextBlock Text="{x:Bind Timestamp}" Style="{StaticResource CaptionTextBlockStyle}"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap"
-                                           Style="{StaticResource CaptionTextBlockStyle}" />
+    <Grid x:Name="WatchSidebar" Margin="12,0,12,12" Height="440" RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border x:Name="WatchBroadcastCard" Padding="12" CornerRadius="8"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Border.Resources>
+                <Style x:Key="WatchFieldLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Style>
+                <Style x:Key="WatchFieldValue" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                </Style>
+            </Border.Resources>
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="手表当前状态" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <ScrollViewer x:Name="WatchBroadcastScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                              AutomationProperties.Name="手表广播状态位">
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Name="WatchBroadcastStoppedText" Text="检测已停止" Style="{StaticResource WatchFieldLabel}" Visibility="Collapsed" />
+                        <Grid x:Name="WatchBroadcastSummary" ColumnSpacing="12" RowSpacing="4">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <TextBlock Text="佩戴" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchWristValue" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                            <TextBlock Grid.Row="1" Text="锁定" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchLockValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                            <TextBlock Grid.Row="2" Text="屏幕" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchScreenValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                        </Grid>
+                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Nearby Info  0x10" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="WatchNearbySourceText" Style="{StaticResource WatchFieldLabel}" />
+                            <StackPanel x:Name="WatchNearbyDetails" Spacing="6">
+                                <TextBlock x:Name="WatchNearbyInfoText" Style="{StaticResource WatchFieldValue}" />
+                                <Grid ColumnSpacing="8" RowSpacing="4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock Text="锁定线索" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchLockFlagText" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="1" Text="解锁线索" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchAutoUnlockFlagText" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="2" Text="手表自动解锁" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchWatchUnlockFlagText" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="3" Text="认证标签" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchAuthTagText" Grid.Row="3" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                </Grid>
+                                <TextBlock x:Name="WatchOtherFlagsText" Style="{StaticResource WatchFieldLabel}" />
                             </StackPanel>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Grid>
-    </Border>
+                        </StackPanel>
+                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Magic Switch  0x0B" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="WatchMagicSwitchText" Style="{StaticResource WatchFieldValue}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+        <Border x:Name="LockActivityFooter" Grid.Row="1" Padding="12" CornerRadius="8"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="锁定与解锁记录" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="LockActivityEmptyText" Grid.Row="1" Text="暂无记录" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" />
+                <ScrollViewer x:Name="LockActivityScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                              AutomationProperties.Name="锁定与解锁过程记录">
+                    <ItemsControl x:Name="LockActivityItems">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:LockActivityEntry">
+                                <StackPanel Margin="0,0,6,10" Spacing="2">
+                                    <TextBlock Text="{x:Bind Timestamp}" Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap"
+                                               Style="{StaticResource CaptionTextBlockStyle}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
 </NavigationView.PaneFooter>
 
 <ScrollViewer x:Name="ContentScrollViewer"
@@ -186,59 +254,6 @@ SizeChanged="ContentScrollViewer_SizeChanged">
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <InfoBar x:Name="IrkError" IsClosable="False" Severity="Warning" />
         </StackPanel>
-    </Border>
-
-    <Border x:Name="WatchBroadcastCard" Style="{StaticResource SettingsCardStyle}">
-    <Border.Resources>
-            <Style x:Key="WatchFieldLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
-                <Setter Property="TextWrapping" Value="Wrap" />
-                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-            </Style>
-            <Style x:Key="WatchFieldValue" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
-                <Setter Property="TextWrapping" Value="Wrap" />
-            </Style>
-        </Border.Resources>
-            <StackPanel Spacing="10">
-                <TextBlock Text="手表当前状态" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="WatchBroadcastStoppedText" Text="检测已停止" Style="{StaticResource WatchFieldLabel}" Visibility="Collapsed" />
-                <Grid x:Name="WatchBroadcastSummary" ColumnSpacing="12" RowSpacing="4">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <TextBlock Text="佩戴" Style="{StaticResource WatchFieldLabel}" />
-                    <TextBlock x:Name="WatchWristValue" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                    <TextBlock Grid.Row="1" Text="锁定" Style="{StaticResource WatchFieldLabel}" />
-                    <TextBlock x:Name="WatchLockValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                    <TextBlock Grid.Row="2" Text="屏幕" Style="{StaticResource WatchFieldLabel}" />
-                    <TextBlock x:Name="WatchScreenValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                </Grid>
-                <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
-                <StackPanel Spacing="4">
-                    <TextBlock Text="Nearby Info  0x10" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock x:Name="WatchNearbySourceText" Style="{StaticResource WatchFieldLabel}" />
-                    <StackPanel x:Name="WatchNearbyDetails" Spacing="6">
-                        <TextBlock x:Name="WatchNearbyInfoText" Style="{StaticResource WatchFieldValue}" />
-                        <Grid ColumnSpacing="8" RowSpacing="4">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                            <TextBlock Text="锁定线索" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchLockFlagText" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                            <TextBlock Grid.Row="1" Text="解锁线索" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchAutoUnlockFlagText" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                            <TextBlock Grid.Row="2" Text="手表自动解锁" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchWatchUnlockFlagText" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                            <TextBlock Grid.Row="3" Text="认证标签" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchAuthTagText" Grid.Row="3" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                        </Grid>
-                        <TextBlock x:Name="WatchOtherFlagsText" Style="{StaticResource WatchFieldLabel}" />
-                    </StackPanel>
-                </StackPanel>
-                <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
-                <StackPanel Spacing="4">
-                    <TextBlock Text="Magic Switch  0x0B" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock x:Name="WatchMagicSwitchText" Style="{StaticResource WatchFieldValue}" />
-                </StackPanel>
-            </StackPanel>
-
     </Border>
 
     <Border Style="{StaticResource SettingsCardStyle}">
