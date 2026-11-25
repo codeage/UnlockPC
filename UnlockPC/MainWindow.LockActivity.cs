@@ -21,7 +21,6 @@ public sealed partial class MainWindow
     private readonly ObservableCollection<LockActivityEntry> _lockActivity = new();
     private long? _lockActivityStart;
     private long _lockActivityPrevious;
-    private string? _lockActivitySignalSpeech;
     private bool _lockActivityScrollPending;
     private LockActivitySpeech? _lockActivitySpeech;
 
@@ -50,7 +49,6 @@ public sealed partial class MainWindow
         if (activity.Phase == LockActivityPhase.Start)
         {
             _lockActivityStart = _lockActivityPrevious = activity.Tick;
-            _lockActivitySignalSpeech = activity.Speech;
             message += "\n开始计时";
             if (announcement is not null)
                 announcement += "开始计时。";
@@ -69,9 +67,8 @@ public sealed partial class MainWindow
                 double totalSeconds = Stopwatch.GetElapsedTime(startedAt, activity.Tick).TotalSeconds;
                 message += $" · 总耗时 {totalSeconds:F2} 秒";
                 if (announcement is not null)
-                    announcement = _lockActivitySignalSpeech + announcement + $"总耗时 {totalSeconds:F2} 秒。";
+                    announcement += $"总耗时 {totalSeconds:F2} 秒。";
                 _lockActivityStart = null;
-                _lockActivitySignalSpeech = null;
             }
         }
 

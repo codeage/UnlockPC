@@ -121,7 +121,6 @@ internal sealed class WatchWake : IDisposable
         _lockRequestedAt = 0;
         _automaticLockPending = false;
         _lockInputStatus = null;
-        _lastReportedSignalBand = null;
         _resume.ClearSession();
         _wakeResult = null;
         PublishSampleMode();
@@ -234,14 +233,13 @@ internal sealed class WatchWake : IDisposable
         {
             FinishActivity("蓝牙检测中断，本轮结束。");
             _lockInputStatus = null;
-            _lastReportedSignalBand = null;
             CancelAuthentication();
             _lockPolicy.ResetSamples(now);
             _automaticLockPending = false;
             samples = default;
         }
 
-        if (!_activityInProgress && (_rules.AutoLock || _rules.AutoUnlock))
+        if (_rules.AutoLock || _rules.AutoUnlock)
             ReportSignalChange(now, samples);
 
         if (_locked == false)
@@ -264,9 +262,8 @@ internal sealed class WatchWake : IDisposable
 
             if (!_activityInProgress)
             {
-                string signal = FormatSignalSpeech(evidence.Rssi <= _rules.VeryWeakRssi ? "极弱信号" : "弱信号", evidence.Rssi);
                 RecordActivity(LockActivityPhase.Start,
-                    $"自动锁定：弱信号达标（{evidence.Rssi} dBm，{evidence.SampleCount} 条）。", signal);
+                    $"自动锁定：弱信号达标（{evidence.Rssi} dBm，{evidence.SampleCount} 条）。", "开始自动锁定。");
                 _lockInputStatus = null;
             }
 
@@ -276,8 +273,7 @@ internal sealed class WatchWake : IDisposable
             {
                 string status = idle is null ? "无法确认本机输入状态，暂停自动锁定。" : "检测到近期本机输入，暂不锁屏。";
                 if (_lockInputStatus != status)
-                    RecordActivity(LockActivityPhase.Step, status,
-                        FormatSignalSpeech(evidence.Rssi <= _rules.VeryWeakRssi ? "极弱信号" : "弱信号", evidence.Rssi) + status);
+                    RecordActivity(LockActivityPhase.Step, status);
                 return _lockInputStatus = status;
             }
             RecordActivity(LockActivityPhase.Step, "本机无输入时长达标。");
@@ -350,7 +346,7 @@ internal sealed class WatchWake : IDisposable
         _directAttempted = true;
         string condition = _rules.RequireWatchUnlocked ? "强信号及手表解锁线索达标" : "强信号达标";
         RecordActivity(LockActivityPhase.Start, $"自动解锁：{condition}（{matched.Rssi} dBm，{matched.SampleCount} 条）。",
-            FormatSignalSpeech("强信号", matched.Rssi));
+            "开始自动解锁。");
         if (_rules.RequireEncryptedConnection)
         {
             if (_verifyConnection is null)
@@ -425,15 +421,11 @@ internal sealed class WatchWake : IDisposable
             : sample.Rssi <= _rules.VeryWeakRssi ? "极弱信号"
             : sample.Rssi <= _rules.WeakRssi ? "弱信号"
             : sample.Rssi >= _rules.ReturnRssi ? "强信号" : null;
-        if (band == _lastReportedSignalBand)
+        if (band is null || band == _lastReportedSignalBand)
             return;
         _lastReportedSignalBand = band;
-        if (band is not null)
-            RecordActivity(LockActivityPhase.Note, $"检测到{band}（{sample.Rssi} dBm）。", FormatSignalSpeech(band, sample.Rssi));
+        RecordActivity(LockActivityPhase.Note, $"检测到{band}（{sample.Rssi} dBm）。", $"检测到{band}。");
     }
-
-    private static string FormatSignalSpeech(string band, short rssi) =>
-        $"检测到{band}，{(rssi < 0 ? "负" : "")}{Math.Abs((int)rssi)} 分贝毫瓦。";
 
     private void RecordActivity(LockActivityPhase phase, string message, string? speech = null)
     {
