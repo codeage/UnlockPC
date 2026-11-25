@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -246,7 +246,6 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         TrialsPage.Visibility = trials ? Visibility.Visible : Visibility.Collapsed;
         AdvancedPage.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
         MonitorPage.Visibility = trials || advanced ? Visibility.Collapsed : Visibility.Visible;
-        UpdateWatchConnectionStatus();
         ContentScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
     }
 

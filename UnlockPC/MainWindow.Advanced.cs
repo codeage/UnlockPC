@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,7 +18,7 @@ public sealed partial class MainWindow
     private void UpdateWatchConnectionStatus()
     {
         StopWatchConnectionStatus();
-        if (_isClosing || AdvancedPage.Visibility != Visibility.Visible)
+        if (_isClosing)
             return;
 
         if (PairedWatchBox.SelectedItem is not PairedWatch watch)
@@ -34,25 +34,39 @@ public sealed partial class MainWindow
             var watcher = DeviceInformation.CreateWatcher(PairedWatch.Selector,
                 [PairedWatch.ConnectionProperty], DeviceInformationKind.AssociationEndpoint);
             _watchConnectionStatusWatcher = watcher;
-
-            void ShowStatus(string status) => DispatcherQueue.TryEnqueue(() =>
-            {
-                if (ReferenceEquals(_watchConnectionStatusWatcher, watcher))
-                    WatchConnectionLiveStatus.Text = label + status;
-            });
+            int address = BluetoothLog.AddressLabel(watch.Address);
+            bool? previousConnection = null;
 
             void UpdateStatus(string id, IReadOnlyDictionary<string, object> properties)
             {
-                if (IsSameId(id, watch.Id) && PairedWatch.ReadConnection(properties) is { } connected)
-                    ShowStatus(connected ? "已连接" : "未连接");
+                if (!IsSameId(id, watch.Id) || PairedWatch.ReadConnection(properties) is not { } connected)
+                    return;
+                var observedAt = DateTimeOffset.Now;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!ReferenceEquals(_watchConnectionStatusWatcher, watcher) || previousConnection == connected)
+                        return;
+                    BluetoothLog.Write(previousConnection is null ? "watch_connection_state_initialized" : "watch_connection_changed",
+                        new { address, previousConnected = previousConnection, connected, observedAt });
+                    previousConnection = connected;
+                    WatchConnectionLiveStatus.Text = label + (connected ? "已连接" : "未连接");
+                });
             }
 
             watcher.Added += (_, device) => UpdateStatus(device.Id, device.Properties);
             watcher.Updated += (_, update) => UpdateStatus(update.Id, update.Properties);
             watcher.Removed += (_, update) =>
             {
-                if (IsSameId(update.Id, watch.Id))
-                    ShowStatus("设备不可用");
+                if (!IsSameId(update.Id, watch.Id))
+                    return;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!ReferenceEquals(_watchConnectionStatusWatcher, watcher))
+                        return;
+                    BluetoothLog.Write("watch_connection_device_removed", new { address, previousConnected = previousConnection });
+                    previousConnection = null;
+                    WatchConnectionLiveStatus.Text = label + "设备不可用";
+                });
             };
             watcher.EnumerationCompleted += (_, _) => DispatcherQueue.TryEnqueue(() =>
             {
@@ -60,7 +74,13 @@ public sealed partial class MainWindow
                     WatchConnectionLiveStatus.Text == label + "正在读取")
                     WatchConnectionLiveStatus.Text = label + "状态未知";
             });
-            watcher.Stopped += (_, _) => ShowStatus("状态监测已停止");
+            watcher.Stopped += (_, _) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!ReferenceEquals(_watchConnectionStatusWatcher, watcher))
+                    return;
+                BluetoothLog.Write("watch_connection_monitor_stopped", new { address, status = watcher.Status.ToString() });
+                WatchConnectionLiveStatus.Text = label + "状态监测已停止";
+            });
             watcher.Start();
         }
         catch (Exception ex)
