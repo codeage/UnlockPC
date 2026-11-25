@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -309,7 +309,7 @@ public sealed partial class MainWindow
         var watcher = new WatchWake(window, broker, _watchRules, async token =>
         {
             if (scan.CopyIrk() is not { } key)
-                return false;
+                return WatchConnectionVerificationResult.Unconfirmed;
             try { return await WatchConnectionVerification.VerifyAsync(watch, key, token, RecordLockActivity).ConfigureAwait(false); }
             finally { CryptographicOperations.ZeroMemory(key); }
         }, RecordLockActivity, ProcessLockedSignals);

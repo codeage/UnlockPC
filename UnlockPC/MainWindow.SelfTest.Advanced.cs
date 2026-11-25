@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 
@@ -86,9 +86,10 @@ public sealed partial class MainWindow
             var watches = await PairedWatch.ListAsync();
             var watch = watches.FirstOrDefault(candidate => IsSameId(candidate.Id, saved.DeviceId))
                 ?? throw new InvalidOperationException("找不到已授权的配对手表。");
-            if (!await WatchConnectionVerification.VerifyAsync(watch, saved.Irk, CancellationToken.None, waitForCleanup: true))
-                throw new InvalidOperationException("未确认已配对手表的新链路加密。");
-            BluetoothLog.Write("ui_self_test_passed", new { test = "watch-encryption" });
+            var result = await WatchConnectionVerification.VerifyAsync(watch, saved.Irk, CancellationToken.None, waitForCleanup: true);
+            if (result == WatchConnectionVerificationResult.Unconfirmed)
+                throw new InvalidOperationException("未通过已配对手表的蓝牙连接验证。");
+            BluetoothLog.Write("ui_self_test_passed", new { test = "watch-encryption", verification = result.ToString() });
             Environment.ExitCode = 0;
         }
         catch (Exception ex)

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
@@ -26,7 +26,7 @@ internal sealed class WatchWake : IDisposable
     private readonly WatchLockPolicy _lockPolicy = new();
     private readonly WatchResumeState _resume = new();
     private readonly DirectUnlock? _directUnlock;
-    private readonly Func<CancellationToken, Task<bool>>? _verifyConnection;
+    private readonly Func<CancellationToken, Task<WatchConnectionVerificationResult>>? _verifyConnection;
     private readonly Action<LockActivityEvent>? _recordActivity;
     private readonly Action? _onVerificationCompleted;
     private readonly bool _directMode;
@@ -44,7 +44,7 @@ internal sealed class WatchWake : IDisposable
     private long _lastWake;
     private bool _directAttempted;
     private CancellationTokenSource? _verificationCancellation;
-    private (Task<bool> Task, WatchSignalDecision Signal)? _pendingVerification;
+    private (Task<WatchConnectionVerificationResult> Task, WatchSignalDecision Signal)? _pendingVerification;
     private long _lockRequestedAt;
     private bool _automaticLockPending;
     private bool _activityInProgress;
@@ -60,7 +60,7 @@ internal sealed class WatchWake : IDisposable
     internal bool RequestsImmediateSamples => Volatile.Read(ref _immediateSamples);
 
     public WatchWake(nint window, DirectUnlock? directUnlock = null, WatchRuleSettings? rules = null,
-        Func<CancellationToken, Task<bool>>? verifyConnection = null, Action<LockActivityEvent>? recordActivity = null,
+        Func<CancellationToken, Task<WatchConnectionVerificationResult>>? verifyConnection = null, Action<LockActivityEvent>? recordActivity = null,
         Action? onVerificationCompleted = null)
     {
         _window = window;
@@ -306,17 +306,19 @@ internal sealed class WatchWake : IDisposable
         if (_pendingVerification is { } verification)
         {
             if (!verification.Task.IsCompleted)
-                return "已锁屏。正在验证手表的加密连接。";
+                return "已锁屏。正在验证手表的蓝牙连接。";
 
             CancelAuthentication();
-            if (!verification.Task.IsCompletedSuccessfully || !verification.Task.Result)
+            if (!verification.Task.IsCompletedSuccessfully || verification.Task.Result == WatchConnectionVerificationResult.Unconfirmed)
             {
-                _wakeResult = "手表加密连接验证失败，请手动解锁。";
+                _wakeResult = "手表蓝牙连接验证失败，请手动解锁。";
                 FinishActivity(_wakeResult);
                 return _wakeResult;
             }
-            RecordActivity(LockActivityPhase.Step, "配对手表加密验证通过。");
-            return OfferUnlock(now, directUnlock, verification.Signal);
+            var connection = verification.Task.Result;
+            RecordActivity(LockActivityPhase.Step, connection == WatchConnectionVerificationResult.AlreadyConnected
+                ? "Windows 确认配对手表已连接。" : "配对手表的新链路加密验证通过。");
+            return OfferUnlock(now, directUnlock, verification.Signal, connection);
         }
         if (_directAttempted)
         {
@@ -366,14 +368,14 @@ internal sealed class WatchWake : IDisposable
         {
             if (_verifyConnection is null)
             {
-                _wakeResult = "无法验证手表的加密连接，请手动解锁。";
+                _wakeResult = "无法验证手表的蓝牙连接，请手动解锁。";
                 FinishActivity(_wakeResult);
                 return _wakeResult;
             }
 
-            RecordActivity(LockActivityPhase.Step, "开始验证手表的加密连接。");
+            RecordActivity(LockActivityPhase.Step, "开始验证手表的蓝牙连接。");
             _verificationCancellation = new CancellationTokenSource();
-            Task<bool> verificationTask = _verifyConnection(_verificationCancellation.Token);
+            var verificationTask = _verifyConnection(_verificationCancellation.Token);
             _pendingVerification = (verificationTask, matched);
             if (_onVerificationCompleted is { } notify)
             {
@@ -384,12 +386,13 @@ internal sealed class WatchWake : IDisposable
                         notify();
                 }), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
-            return "已锁屏。正在验证手表的加密连接。";
+            return "已锁屏。正在验证手表的蓝牙连接。";
         }
         return OfferUnlock(now, directUnlock, matched);
     }
 
-    private string OfferUnlock(long now, DirectUnlock directUnlock, WatchSignalDecision matched)
+    private string OfferUnlock(long now, DirectUnlock directUnlock, WatchSignalDecision matched,
+        WatchConnectionVerificationResult? connection = null)
     {
         try
         {
@@ -401,7 +404,8 @@ internal sealed class WatchWake : IDisposable
             {
                 reason = _lockPolicy.ReturnReason.ToString(), rssi = matched.Rssi, samples = matched.SampleCount,
                 _rules.ReturnRssi, _rules.ReturnWindowSeconds, _rules.ReturnPacketCount, _rules.RequireWatchUnlocked,
-                encryptedConnectionVerified = _rules.RequireEncryptedConnection, _rules.UnlockDelaySeconds
+                connectionVerification = connection?.ToString(),
+                encryptedConnectionVerified = connection == WatchConnectionVerificationResult.NewlyEncrypted, _rules.UnlockDelaySeconds
             });
             if (_displayOff)
                 SetThreadExecutionState(0x00000002); // ES_DISPLAY_REQUIRED

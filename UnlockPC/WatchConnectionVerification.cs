@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Diagnostics.Tracing;
@@ -9,20 +9,22 @@ using Windows.Devices.Enumeration;
 
 namespace UnlockPC;
 
+internal enum WatchConnectionVerificationResult { Unconfirmed, AlreadyConnected, NewlyEncrypted }
+
 internal static class WatchConnectionVerification
 {
     private static readonly Guid BluetoothPort = new("8a1f9517-3a8c-4a9e-a018-4f17a200f277");
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan TraceFlushInterval = TimeSpan.FromMilliseconds(100);
 
-    internal static Task<bool> VerifyAsync(PairedWatch watch, byte[] irk, CancellationToken cancellationToken,
+    internal static Task<WatchConnectionVerificationResult> VerifyAsync(PairedWatch watch, byte[] irk, CancellationToken cancellationToken,
         Action<LockActivityEvent>? recordActivity = null, bool waitForCleanup = false)
     {
-        var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var result = new TaskCompletionSource<WatchConnectionVerificationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var cleanup = VerifyAndReleaseAsync(watch, irk, cancellationToken, recordActivity, result);
         return waitForCleanup ? AwaitCleanupAsync() : result.Task;
 
-        async Task<bool> AwaitCleanupAsync()
+        async Task<WatchConnectionVerificationResult> AwaitCleanupAsync()
         {
             await cleanup.ConfigureAwait(false);
             return await result.Task.ConfigureAwait(false);
@@ -30,38 +32,78 @@ internal static class WatchConnectionVerification
     }
 
     private static async Task VerifyAndReleaseAsync(PairedWatch watch, byte[] irk, CancellationToken cancellationToken,
-        Action<LockActivityEvent>? recordActivity, TaskCompletionSource<bool> result)
+        Action<LockActivityEvent>? recordActivity, TaskCompletionSource<WatchConnectionVerificationResult> result)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(Deadline);
         var token = deadline.Token;
         var clock = Stopwatch.StartNew();
         string outcome = "unavailable";
+        string stage = "opening_paired_device";
+        double? enumerateAdaptersMs = null;
+        int? adapterCount = null;
+        double? openPairedDeviceMs = null;
+        double? openGattSessionMs = null;
+        double? startTraceMs = null;
+        double? initialConnectionCheckMs = null;
+        BluetoothConnectionStatus? initialConnectionStatus = null;
+        double? preRequestConnectionCheckMs = null;
+        BluetoothConnectionStatus? preRequestConnectionStatus = null;
+        long requestTimestamp = 0;
+        double? requestConnectionMs = null;
+        long connectedAt = 0;
+        long connectionEventReceivedAt = 0;
         long encryptedAt = 0;
+        long encryptionEventReceivedAt = 0;
+        double? traceQueryMs = null;
+        (uint Status, uint EventsLost, uint RealTimeBuffersLost)? traceStatistics = null;
+        double? finalConnectionCheckMs = null;
+        BluetoothConnectionStatus? finalConnectionStatus = null;
         try
         {
+            long started = Stopwatch.GetTimestamp();
+            using var device = await BluetoothLEDevice.FromIdAsync(watch.Id).AsTask(token);
+            bool paired = device is not null && device.DeviceInformation.Pairing.IsPaired;
+            openPairedDeviceMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (!paired || device is null)
+                return;
+
+            stage = "checking_initial_connection";
+            started = Stopwatch.GetTimestamp();
+            initialConnectionStatus = device.ConnectionStatus;
+            initialConnectionCheckMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (AcceptExistingConnection(initialConnectionStatus.Value))
+                return;
+
             // BTHPORT's packet event exposes a connection handle, without an adapter identifier.
+            stage = "enumerating_adapters";
+            started = Stopwatch.GetTimestamp();
             var adapters = await DeviceInformation.FindAllAsync(BluetoothAdapter.GetDeviceSelector()).AsTask(token);
+            enumerateAdaptersMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            adapterCount = adapters.Count;
             if (adapters.Count != 1)
             {
                 outcome = "adapter_ambiguous";
                 return;
             }
 
-            using var device = await BluetoothLEDevice.FromIdAsync(watch.Id).AsTask(token);
-            if (device is null || !device.DeviceInformation.Pairing.IsPaired)
-                return;
+            stage = "opening_gatt_session";
+            started = Stopwatch.GetTimestamp();
             using var gatt = await GattSession.FromDeviceIdAsync(device.BluetoothDeviceId).AsTask(token);
-            if (gatt?.CanMaintainConnection != true)
+            bool canMaintainConnection = gatt?.CanMaintainConnection == true;
+            openGattSessionMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (!canMaintainConnection || gatt is null)
                 return;
 
+            stage = "starting_trace";
+            started = Stopwatch.GetTimestamp();
             using var resolver = new IrkResolver(irk);
             string traceName = $"UnlockPC-WatchVerification-{Environment.ProcessId}-{Guid.NewGuid():N}";
             using var trace = new TraceEventSession(traceName);
             trace.EnableProvider(BluetoothPort, TraceEventLevel.Informational);
             var source = trace.Source;
-            var completed = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
-            long requestTimestamp = 0;
+            var completed = new TaskCompletionSource<(long EncryptedAt, long ReceivedAt)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            long activeRequestTimestamp = 0;
             ushort? watchHandle = null;
             source.Dynamic.All += OnTraceEvent;
 
@@ -72,36 +114,56 @@ internal static class WatchConnectionVerification
                 {
                     BluetoothLog.Write("watch_encryption_trace_failed", new { ex.HResult });
                 }
-                finally { completed.TrySetResult(0); }
+                finally { completed.TrySetResult(default); }
             });
 
             using var flushCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
             Task flush = Task.CompletedTask;
             AppDomain.CurrentDomain.ProcessExit += StopTraceOnExit;
+            startTraceMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             try
             {
+                stage = "checking_connection_before_request";
                 token.ThrowIfCancellationRequested();
-                if (device.ConnectionStatus == BluetoothConnectionStatus.Connected)
-                {
-                    outcome = "already_connected";
+                started = Stopwatch.GetTimestamp();
+                preRequestConnectionStatus = device.ConnectionStatus;
+                preRequestConnectionCheckMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                if (AcceptExistingConnection(preRequestConnectionStatus.Value))
                     return;
-                }
 
-                Volatile.Write(ref requestTimestamp, Stopwatch.GetTimestamp());
+                stage = "requesting_connection";
+                requestTimestamp = Stopwatch.GetTimestamp();
+                Volatile.Write(ref activeRequestTimestamp, requestTimestamp);
                 recordActivity?.Invoke(LockActivityEvent.Now(LockActivityPhase.Step, "请求 Windows 建立 BLE 连接。"));
+                started = Stopwatch.GetTimestamp();
                 gatt.MaintainConnection = true;
+                requestConnectionMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                stage = "waiting_for_encryption_event";
                 flush = FlushWhileWaitingAsync(trace, flushCancellation.Token);
-                encryptedAt = await completed.Task.WaitAsync(token).ConfigureAwait(false);
+                (encryptedAt, encryptionEventReceivedAt) = await completed.Task.WaitAsync(token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
-                bool verified = encryptedAt != 0 && HasCompleteTrace(traceName) &&
-                    device.ConnectionStatus == BluetoothConnectionStatus.Connected;
+                if (encryptedAt != 0)
+                {
+                    stage = "checking_trace_integrity";
+                    started = Stopwatch.GetTimestamp();
+                    traceStatistics = QueryTraceStatistics(traceName);
+                    traceQueryMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                    if (traceStatistics is { Status: 0, EventsLost: 0, RealTimeBuffersLost: 0 })
+                    {
+                        stage = "checking_final_connection";
+                        started = Stopwatch.GetTimestamp();
+                        finalConnectionStatus = device.ConnectionStatus;
+                        finalConnectionCheckMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                    }
+                }
+                bool verified = finalConnectionStatus == BluetoothConnectionStatus.Connected;
                 token.ThrowIfCancellationRequested();
                 outcome = verified ? "verified" : "unconfirmed";
-                Complete(verified);
+                Complete(verified ? WatchConnectionVerificationResult.NewlyEncrypted : WatchConnectionVerificationResult.Unconfirmed);
             }
             finally
             {
-                Volatile.Write(ref requestTimestamp, 0);
+                Volatile.Write(ref activeRequestTimestamp, 0);
                 flushCancellation.Cancel();
                 // Verification has its result before session cleanup or the ETW consumer drains.
                 try
@@ -109,7 +171,11 @@ internal static class WatchConnectionVerification
                     await Task.Run(async () =>
                     {
                         await flush.ConfigureAwait(false);
-                        try { gatt.MaintainConnection = false; }
+                        try
+                        {
+                            if (requestTimestamp != 0)
+                                gatt.MaintainConnection = false;
+                        }
                         finally
                         {
                             trace.Stop();
@@ -124,7 +190,7 @@ internal static class WatchConnectionVerification
 
             void OnTraceEvent(TraceEvent data)
             {
-                long requested = Volatile.Read(ref requestTimestamp);
+                long requested = Volatile.Read(ref activeRequestTimestamp);
                 // This session uses QPC timestamps, matching Stopwatch even if the wall clock is adjusted.
 #pragma warning disable CS0618
                 long timestamp = data.TimeStampQPC;
@@ -153,6 +219,8 @@ internal static class WatchConnectionVerification
                     if (packet[6] == 0 && matches)
                     {
                         watchHandle = handle;
+                        Volatile.Write(ref connectionEventReceivedAt, Stopwatch.GetTimestamp());
+                        Volatile.Write(ref connectedAt, timestamp);
                         if (!token.IsCancellationRequested)
                             recordActivity?.Invoke(new LockActivityEvent(data.TimeStamp, timestamp,
                                 LockActivityPhase.Step, "控制器确认已连上配对手表。"));
@@ -166,10 +234,11 @@ internal static class WatchConnectionVerification
                     watchHandle = null;
                 else if (packet[0] is 0x08 or 0x59 && packet[2] == 0 && packet[5] == 1)
                 {
+                    long receivedAt = Stopwatch.GetTimestamp();
                     if (!completed.Task.IsCompleted && !token.IsCancellationRequested)
                         recordActivity?.Invoke(new LockActivityEvent(data.TimeStamp, timestamp,
                             LockActivityPhase.Step, "控制器确认 BLE 链路已加密。"));
-                    completed.TrySetResult(timestamp);
+                    completed.TrySetResult((timestamp, receivedAt));
                 }
             }
         }
@@ -184,21 +253,47 @@ internal static class WatchConnectionVerification
         }
         finally
         {
-            Complete(false);
+            Complete(WatchConnectionVerificationResult.Unconfirmed);
         }
 
-        void Complete(bool verified)
+        bool AcceptExistingConnection(BluetoothConnectionStatus status)
+        {
+            token.ThrowIfCancellationRequested();
+            if (status != BluetoothConnectionStatus.Connected)
+                return false;
+            outcome = "already_connected";
+            Complete(WatchConnectionVerificationResult.AlreadyConnected);
+            return true;
+        }
+
+        void Complete(WatchConnectionVerificationResult verification)
         {
             if (result.Task.IsCompleted)
                 return;
+            long decisionAt = Stopwatch.GetTimestamp();
+            long controllerConnectedAt = Volatile.Read(ref connectedAt);
             BluetoothLog.Write("watch_encryption_verification_finished", new
             {
-                outcome, elapsedMs = clock.ElapsedMilliseconds,
-                controllerToDecisionMs = encryptedAt == 0 ? (double?)null : Stopwatch.GetElapsedTime(encryptedAt).TotalMilliseconds
+                outcome, verification = verification.ToString(), stage, elapsedMs = clock.ElapsedMilliseconds,
+                enumerateAdaptersMs, adapterCount, openPairedDeviceMs, openGattSessionMs, startTraceMs,
+                initialConnectionCheckMs, initialConnectionStatus = initialConnectionStatus?.ToString(),
+                preRequestConnectionCheckMs, preRequestConnectionStatus = preRequestConnectionStatus?.ToString(), requestConnectionMs,
+                requestToControllerConnectedMs = ElapsedBetween(requestTimestamp, controllerConnectedAt),
+                connectionEventDeliveryMs = ElapsedBetween(controllerConnectedAt, Volatile.Read(ref connectionEventReceivedAt)),
+                controllerConnectedToEncryptedMs = ElapsedBetween(controllerConnectedAt, encryptedAt),
+                encryptionEventDeliveryMs = ElapsedBetween(encryptedAt, encryptionEventReceivedAt),
+                encryptionEventReceivedToDecisionMs = ElapsedBetween(encryptionEventReceivedAt, decisionAt),
+                traceQueryMs, traceQueryStatus = traceStatistics?.Status, eventsLost = traceStatistics?.EventsLost,
+                realTimeBuffersLost = traceStatistics?.RealTimeBuffersLost,
+                finalConnectionCheckMs, finalConnectionStatus = finalConnectionStatus?.ToString(),
+                controllerToDecisionMs = ElapsedBetween(encryptedAt, decisionAt)
             });
-            result.TrySetResult(verified);
+            result.TrySetResult(verification);
         }
     }
+
+    private static double? ElapsedBetween(long start, long end) =>
+        start != 0 && end >= start ? Stopwatch.GetElapsedTime(start, end).TotalMilliseconds : null;
 
     private static async Task FlushWhileWaitingAsync(TraceEventSession trace, CancellationToken token)
     {
@@ -215,7 +310,7 @@ internal static class WatchConnectionVerification
         }
     }
 
-    private static unsafe bool HasCompleteTrace(string traceName)
+    private static unsafe (uint Status, uint EventsLost, uint RealTimeBuffersLost) QueryTraceStatistics(string traceName)
     {
         // ControlTraceW requires room after the x64 EVENT_TRACE_PROPERTIES for both UTF-16 names.
         const int nameBytes = 1024 * sizeof(char);
@@ -228,8 +323,8 @@ internal static class WatchConnectionVerification
             statistics->LoggerNameOffset = (uint)sizeof(TraceStatistics);
             statistics->LogFileNameOffset = statistics->LoggerNameOffset + nameBytes;
             const uint query = 0;
-            return ControlTraceW(0, traceName, statistics, query) == 0 &&
-                statistics->EventsLost == 0 && statistics->RealTimeBuffersLost == 0;
+            uint status = ControlTraceW(0, traceName, statistics, query);
+            return (status, statistics->EventsLost, statistics->RealTimeBuffersLost);
         }
     }
 
