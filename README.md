@@ -1,4 +1,4 @@
-# UnlockPC
+﻿# UnlockPC
 
 Windows 11 x64 的 WinUI 3 原型，可观察 Apple Watch 的蓝牙广播。支持靠近亮屏后使用 Windows Hello，也提供使用 Windows 凭据提供程序的实验性自动解锁。
 
@@ -62,7 +62,7 @@ pwsh -File scripts/Test-Presence.ps1
 ## 手表靠近时亮屏并使用 Windows Hello
 
 1. 在 Windows 登录选项中设置 Windows Hello 人脸识别。如果有自动关闭锁屏界面的选项，请将其打开。
-2. 开始检测手表，开启「手表靠近时请求亮屏」。可以关闭设置窗口让应用留在托盘。停止检测或退出应用会关闭此开关。
+2. 在「在场检测」开启「手表靠近时亮屏，使用 Windows Hello」，并开始检测手表。可以关闭设置窗口让应用留在托盘。应用会记住所选模式，开始检测后恢复亮屏功能。开启此模式会关闭密码式自动解锁。
 3. 使用 `Win+L` 锁屏。等待显示器熄屏，在接收范围外停留至少 15 秒，然后带手表返回并面向摄像头。电脑需要保持运行。进入睡眠、休眠、注销或重启后，应用无法以这条路径请求亮屏。
 4. 对照测试时，锁屏后让手表留在近处；随后让手表离开并返回，但不看向摄像头。检查显示状态和 Windows 是否仍要求身份验证。
 
@@ -70,7 +70,7 @@ pwsh -File scripts/Test-Presence.ps1
 
 诊断日志中的 `watch_wake_requested` 记录请求结果，`watch_wake_display_on` 记录随后观察到的显示状态变化，`watch_wake_session_unlocked` 记录 30 秒内收到的 Windows 会话解锁通知。会话通知无法区分人脸、PIN 或其他 Windows 登录方式。Windows Hello 在某些情况下会要求手动进入登录界面，例如刚手动锁屏后的人脸识别防抖期。
 
-亮屏模式仅使用蓝牙触发显示请求，由 Windows Hello 验证身份，这个模式无需提供账户密码。
+亮屏模式只使用蓝牙触发显示请求，由 Windows Hello 验证身份，无需提供账户密码。已绑定手表仍可用于自动锁定。以前保存的密码会保留，如需移除，可在「在场检测」撤销手表授权。
 
 - [微软 Windows Hello 人脸认证](https://learn.microsoft.com/windows-hardware/design/device-experiences/windows-hello-face-authentication)
 - [微软关于靠近唤醒和人脸识别防抖的说明](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/sensors-presence-wake-on-approach)

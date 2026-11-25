@@ -259,6 +259,7 @@ public sealed partial class MainWindow
         try
         {
             AutoUnlockSwitch.IsOn = _watchRules.AutoUnlock;
+            WatchWakeSwitch.IsOn = _watchRules.WakeWithWindowsHello;
             AutoLockSwitch.IsOn = _watchRules.AutoLock;
             ReturnRssiBox.Value = _watchRules.ReturnRssi;
             ReturnWindowBox.Value = _watchRules.ReturnWindowSeconds;
@@ -281,7 +282,16 @@ public sealed partial class MainWindow
 
         var rules = toggle.Name switch
         {
-            nameof(AutoUnlockSwitch) => _watchRules with { AutoUnlock = toggle.IsOn },
+            nameof(AutoUnlockSwitch) => _watchRules with
+            {
+                AutoUnlock = toggle.IsOn,
+                WakeWithWindowsHello = !toggle.IsOn && _watchRules.WakeWithWindowsHello
+            },
+            nameof(WatchWakeSwitch) => _watchRules with
+            {
+                WakeWithWindowsHello = toggle.IsOn,
+                AutoUnlock = !toggle.IsOn && _watchRules.AutoUnlock
+            },
             nameof(AutoLockSwitch) => _watchRules with { AutoLock = toggle.IsOn },
             nameof(RequireWatchUnlockedSwitch) => _watchRules with { RequireWatchUnlocked = toggle.IsOn },
             nameof(RequireEncryptedConnectionSwitch) => _watchRules with { RequireEncryptedConnection = toggle.IsOn },
@@ -331,12 +341,17 @@ public sealed partial class MainWindow
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             UpdateWatchRuleControls();
-            ShowWatchRulesStatus($"无法保存高级选项（0x{ex.HResult:X8}）。", InfoBarSeverity.Error);
+            string message = $"无法保存高级选项（0x{ex.HResult:X8}）。";
+            ShowWatchRulesStatus(message, InfoBarSeverity.Error);
+            if (rules.WakeWithWindowsHello != _watchRules.WakeWithWindowsHello)
+                WatchWakeStatus.Text = message;
             return;
         }
 
         var previous = _watchRules;
         _watchRules = rules;
+        if (previous.AutoUnlock != rules.AutoUnlock || previous.WakeWithWindowsHello != rules.WakeWithWindowsHello)
+            UpdateWatchRuleControls();
         if (previous.WeakRssi != rules.WeakRssi || previous.VeryWeakRssi != rules.VeryWeakRssi)
             UpdateAutoLockRuleDescription();
         if (!rules.SpeakLockActivity)
@@ -354,6 +369,8 @@ public sealed partial class MainWindow
         {
             _directWatchWake?.SetRules(rules);
         }
+        if (previous.WakeWithWindowsHello != rules.WakeWithWindowsHello)
+            UpdateWindowsHelloWake();
         RefreshScan();
     }
 

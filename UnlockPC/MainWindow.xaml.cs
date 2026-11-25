@@ -425,6 +425,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             _scan = new PresenceScan(watch);
             _scan.Start();
             RestoreDirectUnlock(watch, _scan);
+            UpdateWindowsHelloWake();
             _advertisementHistory = _scan.Advertisements;
             _advertisementRows.Clear();
             StartScanButton.IsEnabled = PairedWatchBox.IsEnabled = RefreshWatchesButton.IsEnabled = false;
@@ -493,6 +494,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
     {
         StopDirectUnlock();
         _scan?.StopIrkObservation();
+        UpdateWindowsHelloWake();
         RefreshScan();
     }
 
@@ -500,13 +502,9 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
     {
         _timer.Stop();
         StopDirectUnlock();
-        WatchWakeSwitch.IsOn = false;
-        WatchWakeSwitch.IsEnabled = false;
-        _watchWake?.Dispose();
-        _watchWake = null;
-        WatchWakeStatus.Text = "请先开始手表检测。";
         var scan = _scan;
         _scan = null;
+        UpdateWindowsHelloWake();
         try
         {
             snapshot ??= scan?.Read();
@@ -587,11 +585,6 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             long now = Stopwatch.GetTimestamp();
             var pollGap = Stopwatch.GetElapsedTime(_lastPoll, now);
             _lastPoll = now;
-            if (!WatchWakeSwitch.IsEnabled && _directWatchWake is null)
-            {
-                WatchWakeSwitch.IsEnabled = true;
-                WatchWakeStatus.Text = "已关闭。";
-            }
             if (_watchWake is { } watchWake)
                 WatchWakeStatus.Text = watchWake.Update(now, snapshot.LastNear, pollGap > TimeSpan.FromSeconds(3));
             RefreshDirectUnlock(scan, snapshot);
@@ -668,15 +661,19 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         }
     }
 
-    private void WatchWakeSwitch_Toggled(object sender, RoutedEventArgs args)
+    private void UpdateWindowsHelloWake()
     {
-        if (!WatchWakeSwitch.IsOn)
+        if (!_watchRules.WakeWithWindowsHello || _scan is null || _directWatchWake is not null || _isClosing)
         {
             _watchWake?.Dispose();
             _watchWake = null;
-            WatchWakeStatus.Text = "已关闭。停止检测或退出后，需要重新开启。";
+            WatchWakeStatus.Text = !_watchRules.WakeWithWindowsHello ? "已关闭。"
+                : _scan is null ? "已开启，等待开始手表检测。" : "等待本机控制台锁屏。";
             return;
         }
+
+        if (_watchWake is not null)
+            return;
 
         try
         {
@@ -685,7 +682,6 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         }
         catch (Exception ex)
         {
-            WatchWakeSwitch.IsOn = false;
             WatchWakeStatus.Text = $"无法监听 Windows 会话或显示状态（0x{ex.HResult:X8}）。";
             BluetoothLog.Write("watch_wake_registration_failed", new { ex.HResult });
         }

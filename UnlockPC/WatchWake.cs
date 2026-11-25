@@ -118,7 +118,9 @@ internal sealed class WatchWake : IDisposable
         FinishActivity("规则已更新，本轮结束。");
         CancelAuthentication();
         _rules = rules;
-        _lockPolicy.SetRules(rules, Stopwatch.GetTimestamp());
+        long now = Stopwatch.GetTimestamp();
+        _lockPolicy.SetRules(rules, now);
+        _approach.Reset(now);
         _lockRequestedAt = 0;
         _automaticLockPending = false;
         _lockInputStatus = null;
@@ -171,7 +173,8 @@ internal sealed class WatchWake : IDisposable
         if (_directMode)
         {
             bool firstRead = _resume.TakeFirstRead();
-            return UpdateDirectUnlock(now, samplesDropped || (interrupted && !firstRead), unlockSamples);
+            if (!_rules.WakeWithWindowsHello || _locked != true)
+                return UpdateDirectUnlock(now, samplesDropped || (interrupted && !firstRead), unlockSamples);
         }
 
         if (_locked == false || interrupted)

@@ -211,9 +211,8 @@ SizeChanged="ContentScrollViewer_SizeChanged">
 
     <Border Style="{StaticResource SettingsCardStyle}">
         <StackPanel Spacing="8">
-            <ToggleSwitch x:Name="WatchWakeSwitch" Header="手表靠近时请求亮屏" IsEnabled="False"
-                          Toggled="WatchWakeSwitch_Toggled" />
-            <TextBlock Text="电脑锁屏且熄屏时，手表返回可请求亮屏。启用 Windows Hello 人脸识别后，Windows 可以在认出你时自动解锁。"
+            <ToggleSwitch x:Name="WatchWakeSwitch" Header="手表靠近时亮屏，使用 Windows Hello" Toggled="WatchRuleToggleChanged" />
+            <TextBlock Text="电脑锁屏且熄屏时，手表返回可请求亮屏，登录由 Windows Hello 验证。开启此选项会关闭密码式自动解锁，两种方式可在这里和「高级选项」切换。"
                        TextWrapping="Wrap" />
             <TextBlock x:Name="WatchWakeStatus" Text="请先开始手表检测。" TextWrapping="Wrap"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -334,7 +333,7 @@ SizeChanged="ContentScrollViewer_SizeChanged">
     </Border>
     <Border Style="{StaticResource SettingsCardStyle}">
         <StackPanel Spacing="12">
-            <ToggleSwitch x:Name="AutoUnlockSwitch" Header="自动解锁" Toggled="WatchRuleToggleChanged" />
+            <ToggleSwitch x:Name="AutoUnlockSwitch" Header="使用已保存的密码自动解锁" Toggled="WatchRuleToggleChanged" />
             <TextBlock Text="手动锁屏后，先确认手表离开，再按下方条件判断返回。自动锁屏后，或 Windows 从睡眠恢复且仍锁屏时，直接按下方条件判断。满足条件后向 Windows 发起一次认证。" TextWrapping="Wrap"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <StackPanel Spacing="4">

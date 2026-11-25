@@ -137,6 +137,7 @@ public sealed partial class MainWindow
                 return;
             }
             StopDirectUnlock();
+            UpdateWindowsHelloWake();
         }
 
         UpdateDirectUnlockControls(snapshot.Irk is { Matched: > 0 });
@@ -161,7 +162,9 @@ public sealed partial class MainWindow
             long now = Stopwatch.GetTimestamp();
             bool interrupted = Stopwatch.GetElapsedTime(_lastDirectSignalPoll, now) > TimeSpan.FromSeconds(3);
             _lastDirectSignalPoll = now;
-            string status = watcher.Update(now, 0, interrupted, snapshot.UnlockSamples, snapshot.UnlockSamplesDropped);
+            string status = watcher.Update(now, snapshot.LastNear, interrupted, snapshot.UnlockSamples, snapshot.UnlockSamplesDropped);
+            if (_watchRules.WakeWithWindowsHello)
+                WatchWakeStatus.Text = whileUnlocked ? "等待本机控制台锁屏。" : status;
             if (_needsUnlockCredential)
                 status = $"请设置解锁凭据。{status}";
             if (DirectUnlockStatus.Text != status)
@@ -201,6 +204,7 @@ public sealed partial class MainWindow
             ForgetSavedUnlock();
             if (clearActiveIrk)
                 _scan?.StopIrkObservation();
+            UpdateWindowsHelloWake();
             RefreshScan();
             return;
         }
@@ -298,8 +302,8 @@ public sealed partial class MainWindow
     private void StartDirectUnlock(DirectUnlock? broker, PairedWatch watch, PresenceScan scan)
     {
         nint window = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        WatchWakeSwitch.IsOn = false;
-        WatchWakeSwitch.IsEnabled = false;
+        _watchWake?.Dispose();
+        _watchWake = null;
         void ProcessLockedSignals()
         {
             if (_directWatchWake is { } current)
