@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- How much the title bar dims while the window is inactive (including when disabled by a modal child window), read by ThemedWindow.
+     The value is the one the WinUI TitleBar control uses (microsoft-ui-xaml controls/dev/TitleBar/TitleBar_themeresources.xaml):
+     title bar content other than text drops to this opacity, and title text is painted in its active color at this alpha.
+     No colors here on purpose - per-theme brushes cannot be resolved from a dictionary like this one; see ThemedWindow. -->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <x:Double x:Key="TitleBarDeactivatedOpacity">0.5</x:Double>
+</ResourceDictionary>

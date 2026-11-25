@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.22000.0</TargetPlatformMinVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ProviderDirectory>$(MSBuildProjectDirectory)\..\CredentialProvider</ProviderDirectory>
+    <ProviderDll>$(ProviderDirectory)\bin\x64\Release\UnlockPCCredentialProvider.dll</ProviderDll>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.6584" />
+    <ProjectReference Include="..\external\WinUIKit\src\WinUIKit\WinUIKit.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <None Include="$(ProviderDll)" Link="UnlockPCCredentialProvider.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildCredentialProvider" BeforeTargets="PrepareForBuild"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(Configuration)' == 'Release'"
+          Inputs="$(ProviderDirectory)\Provider.cpp;$(MSBuildProjectDirectory)\..\scripts\Build-CredentialProvider.ps1"
+          Outputs="$(ProviderDll)">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\..\scripts\Build-CredentialProvider.ps1&quot;" />
+  </Target>
+  <Target Name="RequestUnlockPCExit" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\scripts\Stop-UnlockPC.ps1&quot; -TargetExe &quot;$(TargetDir)UnlockPC.exe&quot;" />
+  </Target>
+</Project>
+

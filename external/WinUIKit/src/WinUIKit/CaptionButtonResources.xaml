@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Lightweight styling for the custom-drawn title bar minimize and maximize buttons, attached to the buttons' Resources by ThemedWindow.InstallCaptionButtons.
+     Hover/pressed backgrounds use the WinUI theme's subtle fills (SubtleFillColorSecondary/Tertiary), foregrounds use theme text colors; values for each theme
+     (including high contrast) come from the framework, no hard-coded colors.
+     The close button uses CaptionCloseButtonResources.xaml instead (red background). -->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="TextFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="TextFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorSecondaryBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SubtleFillColorTertiaryBrush"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SystemColorHighlightColorBrush"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SystemColorHighlightColorBrush"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="SystemColorHighlightTextColorBrush"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="SystemColorHighlightTextColorBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SystemColorHighlightColorBrush"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SystemColorHighlightColorBrush"/>
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

@@ -1,0 +1,34 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- Lightweight styling for the title bar close button of modal navigation windows, attached to the button's Resources by ModalNavWindow.AddCloseButton.
+     Points the hover/pressed color keys used by the default button template at the same resources the WinUI theme uses for the system title bar buttons
+     (CloseButtonBackgroundPointerOver/Pressed, CloseButtonStrokePointerOver/Pressed); values for each theme (including high contrast) come from the framework, no hard-coded colors. -->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="CloseButtonStrokePointerOver"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="CloseButtonStrokePressed"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="CloseButtonStrokePointerOver"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="CloseButtonStrokePressed"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+            <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+            <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="CloseButtonStrokePointerOver"/>
+            <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="CloseButtonStrokePressed"/>
+            <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="CloseButtonBackgroundPointerOver"/>
+            <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="CloseButtonBackgroundPressed"/>
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

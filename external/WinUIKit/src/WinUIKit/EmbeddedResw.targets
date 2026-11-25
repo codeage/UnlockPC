@@ -1,0 +1,51 @@
+<Project>
+  <!--
+    Embedded string resources (Strings\*\Ui.resw, read by UiText at runtime) keep only <data name><value>:
+    resw comments describe where a string appears and the related class and property names (e.g. "UiHost.AppName");
+    embedding them as-is would put that text into the native binary in plain text.
+    Release builds (ShippingBuild) additionally drop debug panel strings (keys starting with Debug_; the code using them
+    is inside #if !SHIPPING).
+    Usage: declare <EmbeddedResource Include="...resw" LogicalName="..." /> in the project as usual, then Import this
+    file; before compiling, those items are replaced by stripped copies under obj, with the same LogicalName.
+    Can be imported by any project that embeds .resw files this way.
+  -->
+  <UsingTask TaskName="StripEmbeddedResw" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Source ParameterType="System.String" Required="true" />
+      <Destination ParameterType="System.String" Required="true" />
+      <DropDebug ParameterType="System.Boolean" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Xml.Linq" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        XDocument src = XDocument.Load(Source, LoadOptions.PreserveWhitespace);
+        var root = new XElement("root");
+        foreach (XElement data in src.Root.Elements("data"))
+        {
+            string name = (string)data.Attribute("name");
+            if (name == null || (DropDebug && name.StartsWith("Debug_", StringComparison.Ordinal))) continue;
+            root.Add(new XElement("data", new XAttribute("name", name), new XElement("value", (string)data.Element("value") ?? "")));
+        }
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Destination));
+        string text = new XDocument(root).ToString(SaveOptions.DisableFormatting);
+        if (!System.IO.File.Exists(Destination) || System.IO.File.ReadAllText(Destination) != text)
+            System.IO.File.WriteAllText(Destination, text);
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="StripEmbeddedResw" BeforeTargets="PrepareResourceNames;CoreResGen;PrepareForBuild">
+    <ItemGroup>
+      <_ReswToStrip Include="@(EmbeddedResource)" Condition="'%(Extension)' == '.resw'" />
+    </ItemGroup>
+    <StripEmbeddedResw Condition="'@(_ReswToStrip)' != ''" Source="%(_ReswToStrip.FullPath)"
+                       Destination="$(IntermediateOutputPath)resw\%(_ReswToStrip.LogicalName)"
+                       DropDebug="$([System.String]::Equals('$(ShippingBuild)', 'true'))" />
+    <ItemGroup>
+      <EmbeddedResource Remove="@(_ReswToStrip)" />
+      <EmbeddedResource Include="@(_ReswToStrip->'$(IntermediateOutputPath)resw\%(LogicalName)')" />
+      <FileWrites Include="@(_ReswToStrip->'$(IntermediateOutputPath)resw\%(LogicalName)')" />
+    </ItemGroup>
+  </Target>
+</Project>

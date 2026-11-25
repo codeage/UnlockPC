@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="UnlockPC.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    >
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- 与 CutAnywhere 设置窗口一致：常驻 Left 面板透明并共享窗口 Mica；
+                 LeftCompact 展开时使用 Acrylic，降级路径仍保留约 74% 不透明度。 -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <Color x:Key="NavigationOverlayPaneTintColor">#FF202020</Color>
+                    <Color x:Key="NavigationOverlayPaneColor">#BD202020</Color>
+                    <AcrylicBrush x:Key="NavigationViewDefaultPaneBackground"
+                                  TintColor="{ThemeResource NavigationOverlayPaneTintColor}"
+                                  TintOpacity="0.20"
+                                  TintLuminosityOpacity="0.45"
+                                  FallbackColor="{ThemeResource NavigationOverlayPaneColor}" />
+                    <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <Color x:Key="NavigationOverlayPaneTintColor">#FFF3F3F3</Color>
+                    <Color x:Key="NavigationOverlayPaneColor">#BDF3F3F3</Color>
+                    <AcrylicBrush x:Key="NavigationViewDefaultPaneBackground"
+                                  TintColor="{ThemeResource NavigationOverlayPaneTintColor}"
+                                  TintOpacity="0.20"
+                                  TintLuminosityOpacity="0.45"
+                                  FallbackColor="{ThemeResource NavigationOverlayPaneColor}" />
+                    <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
+

@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/external/WinUIKit/src/">
+    <Project Path="external/WinUIKit/src/WinUIKit/WinUIKit.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+  </Folder>
+  <Project Path="UnlockPC/UnlockPC.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+</Solution>

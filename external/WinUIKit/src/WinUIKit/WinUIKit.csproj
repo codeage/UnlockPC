@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    WinUIKit: WinUI 3 window infrastructure - the base window ThemedWindow, the dialog window DialogWindow, the
+    settings-style modal navigation window ModalNavWindow and their helpers. The host application supplies its name,
+    theme, language, logging and settings store through UiHost at startup.
+    Target: .NET 10 (Native AOT compatible), unpackaged apps, Windows App SDK 2.5.1, Windows 10 1809 or later.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>WinUIKit</RootNamespace>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- Window subclass procedures use unmanaged function pointers ([UnmanagedCallersOnly]), see ContentCursorFallback -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <!-- WMC1510 = XAML binding path is not trim/AOT safe: use x:Bind only -->
+    <MSBuildWarningsAsErrors>$(MSBuildWarningsAsErrors);WMC1510</MSBuildWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Release packaging (pass -p:ShippingBuild=true as a global property): defines SHIPPING, which removes
+       self-test hooks and A/B switches -->
+  <PropertyGroup Condition="'$(ShippingBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);SHIPPING</DefineConstants>
+  </PropertyGroup>
+  <!-- Trace logging (UiHost.WriteTrace) only exists outside ShippingBuild: release builds log errors only and
+       carry no trace text -->
+  <PropertyGroup Condition="'$(ShippingBuild)' != 'true'">
+    <DefineConstants>$(DefineConstants);UI_TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.6584" />
+    <!-- Settings cards used on ModalNavWindow pages -->
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.250402" />
+  </ItemGroup>
+
+  <!-- The library's own UI text (caption button names, zh-CN / en-US): embedded resources looked up at runtime by
+       UiHost.Language (Strings\UiText.cs), not part of the PRI. Logical names are spelled out because names derived
+       from the folder turn "zh-CN" into "zh_CN" and the lookup fails. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Strings\zh-CN\Ui.resw" LogicalName="WinUIKit.zh-CN.Ui.resw" />
+    <EmbeddedResource Include="Strings\en-US\Ui.resw" LogicalName="WinUIKit.en-US.Ui.resw" />
+    <PRIResource Remove="Strings\**\*.resw" />
+  </ItemGroup>
+  <!-- What gets embedded is a copy with comments stripped (and debug-only strings removed in ShippingBuild),
+       see EmbeddedResw.targets -->
+  <Import Project="EmbeddedResw.targets" />
+
+  <!-- Assemblies allowed to see internal members (self-test hooks such as DialogWindow.ShellForSelfTest): the unit
+       tests, plus whatever WinUIKitFriendAssemblies lists (semicolon-separated assembly names, e.g. an app's own
+       UI self-test). Set it in an untracked Directory.Build.local.props at the repository root, see the README.
+       Never granted in ShippingBuild, so release binaries carry no friend assembly names. -->
+  <ItemGroup Condition="'$(ShippingBuild)' != 'true'">
+    <InternalsVisibleTo Include="WinUIKit.Tests" />
+    <InternalsVisibleTo Include="$(WinUIKitFriendAssemblies)" Condition="'$(WinUIKitFriendAssemblies)' != ''" />
+  </ItemGroup>
+
+</Project>
