@@ -50,6 +50,7 @@ internal sealed class WatchWake : IDisposable
     private bool _activityInProgress;
     private string? _lockInputStatus;
     private string? _lastReportedSignalBand;
+    private WatchUnlockBlock? _lastReportedUnlockBlock;
     private WatchRuleSettings _rules = new();
 
     internal long LastLockNotification { get; private set; }
@@ -121,6 +122,7 @@ internal sealed class WatchWake : IDisposable
         _lockRequestedAt = 0;
         _automaticLockPending = false;
         _lockInputStatus = null;
+        _lastReportedUnlockBlock = null;
         _resume.ClearSession();
         _wakeResult = null;
         PublishSampleMode();
@@ -309,7 +311,7 @@ internal sealed class WatchWake : IDisposable
             CancelAuthentication();
             if (!verification.Task.IsCompletedSuccessfully || !verification.Task.Result)
             {
-                _wakeResult = "手表加密连接验证未通过，请手动解锁。";
+                _wakeResult = "手表加密连接验证失败，请手动解锁。";
                 FinishActivity(_wakeResult);
                 return _wakeResult;
             }
@@ -335,6 +337,19 @@ internal sealed class WatchWake : IDisposable
         }
         if (approach is not { } matched)
         {
+            if (_lockPolicy.LastStrongSignalBlock is { } block && block != _lastReportedUnlockBlock)
+            {
+                _lastReportedUnlockBlock = block;
+                RecordActivity(LockActivityPhase.Note, block switch
+                {
+                    WatchUnlockBlock.WaitingForDeparture => "尚未检测到手表离开，暂不解锁。",
+                    WatchUnlockBlock.WaitingForDelay => "锁定后的等待时间未到，暂不解锁。",
+                    WatchUnlockBlock.WatchAppearsLocked => "手表广播提示仍处于锁定状态，暂不解锁。",
+                    WatchUnlockBlock.WatchUnlockUnconfirmed => "无法确认手表已解锁，暂不解锁。",
+                    WatchUnlockBlock.WaitingForBroadcastCount => "符合条件的广播数量还不够，暂不解锁。",
+                    _ => "暂未满足解锁条件。"
+                });
+            }
             TimeSpan remaining = _lockPolicy.ReturnDelayRemaining(_lockedAt, now);
             if (remaining > TimeSpan.Zero)
                 return $"已锁屏。距可开始自动解锁还有 {Math.Ceiling(remaining.TotalSeconds):F0} 秒。";
@@ -424,6 +439,8 @@ internal sealed class WatchWake : IDisposable
         if (band is null || band == _lastReportedSignalBand)
             return;
         _lastReportedSignalBand = band;
+        if (band != "强信号")
+            _lastReportedUnlockBlock = null;
         RecordActivity(LockActivityPhase.Note, $"检测到{band}（{sample.Rssi} dBm）。", $"检测到{band}。");
     }
 
@@ -460,6 +477,7 @@ internal sealed class WatchWake : IDisposable
                 _wakeResult = null;
                 _lastWake = 0;
                 _directAttempted = false;
+                _lastReportedUnlockBlock = null;
                 CancelAuthentication();
                 _approach.Reset(now);
                 bool automatic = _automaticLockPending &&

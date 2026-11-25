@@ -14,6 +14,7 @@ internal sealed class WatchLockPolicy
     private long _lastSample;
 
     public WatchReturnReason? ReturnReason { get; private set; }
+    public WatchUnlockBlock? LastStrongSignalBlock { get; private set; }
 
     public void SetRules(WatchRuleSettings rules, long now)
     {
@@ -39,6 +40,7 @@ internal sealed class WatchLockPolicy
 
     public WatchSignalDecision? Observe(long now, ReadOnlySpan<WatchSignalSample> samples, bool locked, long? lockedAt = null)
     {
+        LastStrongSignalBlock = null;
         TimeSpan returnWindow = TimeSpan.FromSeconds(_rules.ReturnWindowSeconds);
         while (_strong.TryPeek(out long oldest) && Stopwatch.GetElapsedTime(oldest, now) > returnWindow)
             _strong.Dequeue();
@@ -49,18 +51,24 @@ internal sealed class WatchLockPolicy
                 continue;
 
             TimeSpan age = Stopwatch.GetElapsedTime(sample.Timestamp, now);
+            bool strongWhileLocked = locked && sample.Rssi >= _rules.ReturnRssi && age <= returnWindow;
+            if (strongWhileLocked)
+            {
+                LastStrongSignalBlock = ReturnReason is null ? WatchUnlockBlock.WaitingForDeparture
+                    : ReturnDelayRemaining(lockedAt, sample.Timestamp) > TimeSpan.Zero ? WatchUnlockBlock.WaitingForDelay
+                    : GetWatchUnlockBlock(sample.NearbyFlags);
+            }
+
             if (locked && ReturnReason is not null)
             {
                 _lastSample = sample.Timestamp;
-                bool watchUnlocked = sample.NearbyFlags is { } flags && (flags & 0xA0) == 0x80;
-                if (sample.Rssi >= _rules.ReturnRssi && age <= returnWindow &&
-                    ReturnDelayRemaining(lockedAt, sample.Timestamp) <= TimeSpan.Zero &&
-                    (!_rules.RequireWatchUnlocked || watchUnlocked))
+                if (strongWhileLocked && LastStrongSignalBlock is null)
                 {
                     _strong.Enqueue(sample.Timestamp);
                     if (_strong.Count >= _rules.ReturnPacketCount)
                         return new WatchSignalDecision(_strong.Count,
                             Stopwatch.GetElapsedTime(_strong.Peek(), sample.Timestamp), sample.Rssi);
+                    LastStrongSignalBlock = WatchUnlockBlock.WaitingForBroadcastCount;
                 }
                 continue;
             }
@@ -93,6 +101,18 @@ internal sealed class WatchLockPolicy
     }
 
     public static bool InputAllowsLock(TimeSpan? idleTime) => idleTime >= RequiredIdle;
+
+    private WatchUnlockBlock? GetWatchUnlockBlock(byte? flags)
+    {
+        if (!_rules.RequireWatchUnlocked)
+            return null;
+        return (flags & 0xA0) switch
+        {
+            0x80 => null,
+            0x20 => WatchUnlockBlock.WatchAppearsLocked,
+            _ => WatchUnlockBlock.WatchUnlockUnconfirmed
+        };
+    }
 
     private WatchSignalDecision? ConfirmDeparture(long now, WatchSignalSample latest)
     {
@@ -133,6 +153,10 @@ internal sealed class WatchLockPolicy
 }
 
 internal enum WatchReturnReason { ObservedDeparture, AutomaticLock, SystemResume }
+internal enum WatchUnlockBlock
+{
+    WaitingForDeparture, WaitingForDelay, WatchAppearsLocked, WatchUnlockUnconfirmed, WaitingForBroadcastCount
+}
 
 internal readonly record struct WatchSignalDecision(int SampleCount, TimeSpan Duration, short Rssi);
 

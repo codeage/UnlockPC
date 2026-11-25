@@ -128,10 +128,16 @@ internal static class WatchLockPolicySelfTest
             ReturnPacketCount: 2, RequireWatchUnlocked: true), At(0));
         policy.Reset(At(0), WatchReturnReason.AutomaticLock);
         Check(policy.Observe(At(1), [new(At(1), -40)], locked: true) is null, "missing unlock flag is rejected");
+        Check(policy.LastStrongSignalBlock == WatchUnlockBlock.WatchUnlockUnconfirmed, "missing flag cannot confirm watch unlock");
         Check(policy.Observe(At(2), [new(At(2), -40, 0x18)], locked: true) is null, "cleared unlock flag is rejected");
         Check(policy.Observe(At(3), [new(At(3), -40, 0xB8)], locked: true) is null, "conflicting flags are rejected");
+        Check(policy.LastStrongSignalBlock == WatchUnlockBlock.WatchUnlockUnconfirmed, "conflicting flags are inconclusive");
+        Check(policy.Observe(At(3.5), [new(At(3.5), -40, 0x28)], locked: true) is null &&
+            policy.LastStrongSignalBlock == WatchUnlockBlock.WatchAppearsLocked, "locked watch has a distinct block reason");
         Check(policy.Observe(At(4), [new(At(4), -56, 0x98)], locked: true) is null, "custom threshold boundary");
+        Check(policy.LastStrongSignalBlock is null, "a weak sample does not repeat the previous strong-signal block");
         Check(policy.Observe(At(5), [new(At(5), -55, 0x90)], locked: true) is null, "one qualified packet is insufficient");
+        Check(policy.LastStrongSignalBlock == WatchUnlockBlock.WaitingForBroadcastCount, "insufficient qualified broadcasts have a distinct reason");
         Check(policy.Observe(At(9.1), [new(At(9.1), -55, 0x98)], locked: true) is null, "earlier packet expired");
         var decision = policy.Observe(At(10), [new(At(10), -54, 0x90)], locked: true);
         Check(decision is { SampleCount: 2, Rssi: -54 }, "two packets with unlock bit and custom limits");
@@ -159,6 +165,7 @@ internal static class WatchLockPolicySelfTest
             policy.ReturnReason == WatchReturnReason.ObservedDeparture, "departure can be observed during unlock delay");
         Check(policy.Observe(At(15), [new(At(14.9), -44)], locked: true, lockedAt: At(10)) is null,
             "a buffered strong sample taken before the delay expires is rejected");
+        Check(policy.LastStrongSignalBlock == WatchUnlockBlock.WaitingForDelay, "delay is reported ahead of watch state");
         Check(policy.Observe(At(15), [new(At(15), -44)], locked: true, lockedAt: At(10)) is not null,
             "new strong samples are eligible at the delay boundary");
     }
