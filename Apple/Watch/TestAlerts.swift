@@ -11,6 +11,12 @@ final class TestAlerts: NSObject, ObservableObject {
         let label: String
     }
 
+    private struct DiscoveryProbe {
+        let peripheral: CBPeripheral
+        let label: String
+        let timeout: Task<Void, Never>
+    }
+
     @Published private(set) var status = "正在准备蓝牙"
     @Published private(set) var candidates: [Candidate] = []
     @Published private(set) var isScanning = false
@@ -18,6 +24,7 @@ final class TestAlerts: NSObject, ObservableObject {
     @Published private(set) var lastReceived: Date?
 
     private let service = CBUUID(string: TestAlertPacket.serviceID)
+    private let compatibilityService = CBUUID(string: "180D")
     private let characteristic = CBUUID(string: TestAlertPacket.characteristicID)
     private let preferences = UserDefaults.standard
     private let notificationCenter = UNUserNotificationCenter.current()
@@ -28,6 +35,8 @@ final class TestAlerts: NSObject, ObservableObject {
     private var selection: UUID?
     private var peer: CBPeripheral?
     private var discovered: [UUID: CBPeripheral] = [:]
+    private var probes: [UUID: DiscoveryProbe] = [:]
+    private var probed: Set<UUID> = []
     private var isForeground = false
     private var scanTimeout: Task<Void, Never>?
     private var autoConnectTask: Task<Void, Never>?
@@ -69,9 +78,10 @@ final class TestAlerts: NSObject, ObservableObject {
         }
         candidates.removeAll()
         discovered.removeAll()
+        probed.removeAll()
         isScanning = true
         status = "正在搜索测试电脑"
-        central.scanForPeripherals(withServices: [service])
+        central.scanForPeripherals(withServices: [service, compatibilityService])
         scanTimeout = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(15)) } catch { return }
             guard let self else { return }
@@ -95,7 +105,7 @@ final class TestAlerts: NSObject, ObservableObject {
 
     func select(_ id: UUID) {
         guard let peripheral = discovered[id] else { return }
-        stopScan()
+        stopScan(keeping: id)
         candidates.removeAll()
         discovered.removeAll()
         if let previous = peer, previous.identifier != id {
@@ -137,13 +147,23 @@ final class TestAlerts: NSObject, ObservableObject {
         }
     }
 
-    private func stopScan() {
+    private func stopScan(keeping id: UUID? = nil) {
         scanTimeout?.cancel()
         scanTimeout = nil
         autoConnectTask?.cancel()
         autoConnectTask = nil
         if central.isScanning { central.stopScan() }
         isScanning = false
+        for peripheral in discovered.values where peripheral.identifier != id && peripheral.identifier != selection {
+            central.cancelPeripheralConnection(peripheral)
+        }
+        for probe in probes.values {
+            probe.timeout.cancel()
+            if probe.peripheral.identifier != id && probe.peripheral.identifier != selection {
+                central.cancelPeripheralConnection(probe.peripheral)
+            }
+        }
+        probes.removeAll()
     }
 
     private func reconnectIfNeeded() {
@@ -160,12 +180,40 @@ final class TestAlerts: NSObject, ObservableObject {
         peripheral.delegate = self
         switch peripheral.state {
         case .connected:
-            peripheral.discoverServices([service])
+            peripheral.discoverServices([service, compatibilityService])
         case .disconnected:
             status = "正在连接测试电脑"
             central.connect(peripheral)
         default:
             break
+        }
+    }
+
+    private func finishProbe(_ peripheral: CBPeripheral, valid: Bool) {
+        let id = peripheral.identifier
+        guard let probe = probes.removeValue(forKey: id) else { return }
+        probe.timeout.cancel()
+        if valid && isScanning {
+            addCandidate(peripheral, label: probe.label)
+        } else if id != selection {
+            central.cancelPeripheralConnection(peripheral)
+        }
+    }
+
+    private func addCandidate(_ peripheral: CBPeripheral, label: String) {
+        let id = peripheral.identifier
+        guard isScanning, discovered[id] == nil else { return }
+        discovered[id] = peripheral
+        candidates.append(Candidate(id: id, label: label))
+        autoConnectTask?.cancel()
+        guard candidates.count == 1 else {
+            status = "找到多台测试电脑，请选择"
+            return
+        }
+        autoConnectTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard let self, self.isForeground, self.isScanning, self.candidates.count == 1 else { return }
+            self.select(id)
         }
     }
 
@@ -228,11 +276,7 @@ final class TestAlerts: NSObject, ObservableObject {
 extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         guard central.state == .poweredOn else {
-            scanTimeout?.cancel()
-            scanTimeout = nil
-            autoConnectTask?.cancel()
-            autoConnectTask = nil
-            isScanning = false
+            stopScan()
             status = central.state == .unknown || central.state == .resetting
                 ? "正在准备蓝牙" : "蓝牙不可用，请检查设置"
             return
@@ -262,29 +306,37 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
             ?? peripheral.name ?? "测试电脑"
         let label = "\(name) · \(peripheral.identifier.uuidString.suffix(4))"
-        discovered[peripheral.identifier] = peripheral
-        candidates.append(Candidate(id: peripheral.identifier, label: label))
-        autoConnectTask?.cancel()
-        guard candidates.count == 1 else {
-            status = "找到多台测试电脑，请选择"
+        let advertised = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? [])
+            + (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] ?? [])
+        if advertised.contains(service) {
+            addCandidate(peripheral, label: label)
             return
         }
         let id = peripheral.identifier
-        autoConnectTask = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
-            guard let self, self.isForeground, self.isScanning, self.candidates.count == 1 else { return }
-            self.select(id)
+        guard advertisementData[CBAdvertisementDataIsConnectable] as? Bool != false,
+              probes.count < 4, probed.insert(id).inserted else { return }
+        let timeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(4)) } catch { return }
+            self?.finishProbe(peripheral, valid: false)
+        }
+        probes[id] = DiscoveryProbe(peripheral: peripheral, label: label, timeout: timeout)
+        peripheral.delegate = self
+        if peripheral.state == .connected {
+            peripheral.discoverServices([service, compatibilityService])
+        } else if peripheral.state == .disconnected {
+            central.connect(peripheral)
         }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard peripheral.identifier == selection else { return }
-        peripheral.discoverServices([service])
+        guard peripheral.identifier == selection || probes[peripheral.identifier] != nil else { return }
+        peripheral.discoverServices([service, compatibilityService])
     }
 
     func centralManager(
         _ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?
     ) {
+        finishProbe(peripheral, valid: false)
         guard peripheral.identifier == selection else { return }
         report("连接失败，请重新搜索电脑", error: error)
     }
@@ -292,15 +344,19 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(
         _ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?
     ) {
+        finishProbe(peripheral, valid: false)
         guard peripheral.identifier == selection, central.state == .poweredOn else { return }
         report("连接中断，等待重新连接", error: error)
         central.connect(peripheral)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard peripheral.identifier == selection else { return }
-        guard error == nil, let match = peripheral.services?.first(where: { $0.uuid == service }) else {
-            report("找不到测试提醒服务", error: error)
+        let id = peripheral.identifier
+        guard id == selection || probes[id] != nil else { return }
+        guard error == nil, let match = peripheral.services?.first(where: { $0.uuid == service })
+                  ?? peripheral.services?.first(where: { $0.uuid == compatibilityService }) else {
+            finishProbe(peripheral, valid: false)
+            if id == selection { report("找不到测试提醒服务", error: error) }
             return
         }
         peripheral.discoverCharacteristics([characteristic], for: match)
@@ -309,13 +365,17 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
     func peripheral(
         _ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?
     ) {
-        guard peripheral.identifier == selection, service.uuid == self.service else { return }
+        let id = peripheral.identifier
+        guard id == selection || probes[id] != nil else { return }
         guard error == nil,
               let value = service.characteristics?.first(where: { $0.uuid == characteristic }),
               value.properties.contains(.notify) else {
-            report("找不到测试提醒特征", error: error)
+            finishProbe(peripheral, valid: false)
+            if id == selection { report("找不到测试提醒特征", error: error) }
             return
         }
+        finishProbe(peripheral, valid: true)
+        guard id == selection else { return }
         if value.isNotifying {
             status = "已订阅，等待电脑发送测试提醒"
         } else {
