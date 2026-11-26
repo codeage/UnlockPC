@@ -256,9 +256,9 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_FILE = iPhone/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = UnlockPC;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-			INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -273,9 +273,9 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_FILE = iPhone/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = UnlockPC;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-			INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc;
 				PRODUCT_NAME = "$(TARGET_NAME)";

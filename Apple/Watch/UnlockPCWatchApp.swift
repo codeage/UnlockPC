@@ -12,7 +12,7 @@ struct UnlockPCWatchApp: App {
     var body: some Scene {
         WindowGroup {
             WatchHomeView(alerts: alerts, push: push)
-                .task { await alerts.requestPermission(onlyIfUndetermined: true) }
+                .task { await push.register() }
         }
         .backgroundTask(.bluetoothAlert) {
             await alerts.handleBackgroundAlert()

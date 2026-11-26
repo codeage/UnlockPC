@@ -41,6 +41,7 @@ jobs:
           done
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = com.bytereset.unlockpc
           test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$watch/Info.plist")" = com.bytereset.unlockpc.watchkitapp
+          test "$(/usr/libexec/PlistBuddy -c 'Print UIFileSharingEnabled' "$app/Info.plist")" = true
           mkdir -p "$RUNNER_TEMP/unlockpc-device/Payload"
           cd "$RUNNER_TEMP/unlockpc-device"
           ditto "$app" Payload/UnlockPC.app
