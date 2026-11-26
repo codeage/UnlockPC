@@ -107,6 +107,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private var central: CBCentralManager!
     private var peer: CBPeripheral?
     private var processing = false
+    private var exchange = 0
+    private var exchangeTimeout: Task<Void, Never>?
 
     @Published private(set) var armed = false
     @Published private(set) var status = "等待布防"
@@ -124,7 +126,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     func toggle() async {
         if armed {
-            finish("已取消布防")
+            disarm()
             return
         }
         guard central.state == .poweredOn else {
@@ -136,8 +138,6 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             return
         }
         UserDefaults.standard.set(Int(pid), forKey: armedPIDKey)
-        UserDefaults.standard.removeObject(forKey: notificationTimingKey)
-        notificationTiming = nil
         armed = true
         status = "已布防，请按表冠回表盘"
         log.notice("Armed pid=\(self.pid, privacy: .public)")
@@ -146,7 +146,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     func handleBackground() async {
         let deadline = ContinuousClock.now + .seconds(8)
-        while (armed || processing) && ContinuousClock.now < deadline {
+        let initialExchange = exchange
+        while armed && exchange == initialExchange && ContinuousClock.now < deadline {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
         }
     }
@@ -177,14 +178,31 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         }
     }
 
-    private func finish(_ message: String) {
+    private func disarm() {
         armed = false
-        processing = false
         UserDefaults.standard.removeObject(forKey: armedPIDKey)
         if central.isScanning { central.stopScan() }
-        if let peer { central.cancelPeripheralConnection(peer) }
+        finishExchange("已取消布防")
+    }
+
+    private func finishExchange(_ message: String) {
+        exchangeTimeout?.cancel()
+        status = armed ? "\(message)。仍在布防，等待下一条。" : message
+        processing = false
+        if let peer, peer.state != .disconnected {
+            central.cancelPeripheralConnection(peer)
+        } else {
+            resumeScan()
+        }
+    }
+
+    private func resumeScan() {
+        exchangeTimeout?.cancel()
+        exchangeTimeout = nil
         peer = nil
-        status = message
+        processing = false
+        exchange += 1
+        startScan()
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -204,34 +222,41 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         guard armed, peer == nil else { return }
         log.notice("Discovered broadcast pid=\(self.pid, privacy: .public)")
         peer = peripheral
+        central.stopScan()
         peripheral.delegate = self
         central.connect(peripheral)
+        exchangeTimeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            self?.finishExchange("本次广播连接超时")
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        guard peripheral.identifier == peer?.identifier else { return }
+        guard armed, peripheral.identifier == peer?.identifier else { return }
         peripheral.discoverServices([serviceID])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        if peripheral.identifier == peer?.identifier { peer = nil }
+        if peripheral.identifier == peer?.identifier { resumeScan() }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        if peripheral.identifier == peer?.identifier { peer = nil }
+        if peripheral.identifier == peer?.identifier { resumeScan() }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let service = peripheral.services?.first(where: { $0.uuid == serviceID }) else {
-            finish("没有找到广播测试服务")
+        guard armed, peripheral.identifier == peer?.identifier else { return }
+        guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == serviceID }) else {
+            finishExchange("没有找到广播测试服务")
             return
         }
         peripheral.discoverCharacteristics([eventID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let value = service.characteristics?.first(where: { $0.uuid == eventID }) else {
-            finish("没有找到广播测试特征")
+        guard armed, peripheral.identifier == peer?.identifier else { return }
+        guard error == nil, let value = service.characteristics?.first(where: { $0.uuid == eventID }) else {
+            finishExchange("没有找到广播测试特征")
             return
         }
         peripheral.readValue(for: value)
@@ -239,10 +264,20 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor value: CBCharacteristic, error: Error?) {
         let received = Date()
-        guard armed, !processing, peripheral.identifier == peer?.identifier, value.uuid == eventID,
-              let data = value.value, let token = TestAlertPacket.eventID(in: data, now: received) else { return }
+        guard armed, !processing, peripheral.identifier == peer?.identifier, value.uuid == eventID else { return }
+        guard error == nil, let data = value.value, let token = TestAlertPacket.eventID(in: data, now: received) else {
+            finishExchange("没有读到有效的广播测试数据")
+            return
+        }
         processing = true
+        let currentExchange = exchange
         let restarted = Int(pid) != UserDefaults.standard.integer(forKey: armedPIDKey)
+        var reply = Data(data[2..<18])
+        reply.append(restarted ? 1 : 0)
+        if UserDefaults.standard.dictionary(forKey: notificationTimingKey)?["id"] as? String == token.uuidString {
+            peripheral.writeValue(reply, for: value, type: .withResponse)
+            return
+        }
         log.notice("Received \(token.uuidString, privacy: .public) pid=\(self.pid, privacy: .public) restarted=\(restarted, privacy: .public)")
         Task {
             let content = UNMutableNotificationContent()
@@ -254,22 +289,20 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
                     UNNotificationRequest(identifier: token.uuidString, content: content, trigger: nil)
                 )
                 let submitted = Date()
-                if armed, peripheral.identifier == peer?.identifier {
-                    var reply = Data(data[2..<18])
-                    reply.append(restarted ? 1 : 0)
-                    peripheral.writeValue(reply, for: value, type: .withResponse)
-                }
+                guard armed, currentExchange == exchange, processing else { return }
+                peripheral.writeValue(reply, for: value, type: .withResponse)
                 let sample: [String: Any] = ["id": token.uuidString, "received": received, "submitted": submitted]
                 UserDefaults.standard.set(sample, forKey: notificationTimingKey)
+                notificationTiming = nil
             } catch {
-                finish("系统通知提交失败")
+                if armed, currentExchange == exchange, processing { finishExchange("系统通知提交失败") }
             }
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        if characteristic.uuid == eventID {
-            finish(error == nil ? "已提交提醒并回传结果" : "已提交提醒，回执发送失败")
+        if armed, processing, peripheral.identifier == peer?.identifier, characteristic.uuid == eventID {
+            finishExchange(error == nil ? "已提交提醒并回传结果" : "已提交提醒，回执发送失败")
         }
     }
 }
