@@ -46,6 +46,12 @@ private struct WatchHomeView: View {
                         Task { await broadcast.toggle() }
                     }
                     Text(broadcast.status)
+                    Button("查看通知延迟") {
+                        Task { await broadcast.readNotificationTiming() }
+                    }
+                    if let timing = broadcast.notificationTiming {
+                        Text(timing)
+                    }
                 }
                 Section("APNs 实测") {
                     Text(push.status)
@@ -96,6 +102,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private let eventID = CBUUID(string: "D037E925-FA37-4F34-B1C5-46A2484A4810")
     private let log = Logger(subsystem: "com.bytereset.unlockpc.watchkitapp", category: "BroadcastWakeTest")
     private let armedPIDKey = "broadcastWakeTest.armedPID"
+    private let notificationTimingKey = "broadcastWakeTest.notificationTiming"
     private let pid = ProcessInfo.processInfo.processIdentifier
     private var central: CBCentralManager!
     private var peer: CBPeripheral?
@@ -103,6 +110,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     @Published private(set) var armed = false
     @Published private(set) var status = "等待布防"
+    @Published private(set) var notificationTiming: String?
 
     override init() {
         super.init()
@@ -128,6 +136,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             return
         }
         UserDefaults.standard.set(Int(pid), forKey: armedPIDKey)
+        UserDefaults.standard.removeObject(forKey: notificationTimingKey)
+        notificationTiming = nil
         armed = true
         status = "已布防，请按表冠回表盘"
         log.notice("Armed pid=\(self.pid, privacy: .public)")
@@ -139,6 +149,26 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         while (armed || processing) && ContinuousClock.now < deadline {
             do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
         }
+    }
+
+    func readNotificationTiming() async {
+        guard let sample = UserDefaults.standard.dictionary(forKey: notificationTimingKey),
+              let id = sample["id"] as? String,
+              let received = sample["received"] as? Date,
+              let submitted = sample["submitted"] as? Date else {
+            notificationTiming = "还没有广播测试记录"
+            return
+        }
+
+        let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
+        guard let notification = notifications.first(where: { $0.request.identifier == id }) else {
+            notificationTiming = "通知中心没有这次测试的记录"
+            return
+        }
+        let receiveToSubmit = Int((submitted.timeIntervalSince(received) * 1000).rounded())
+        let submitToDelivery = Int((notification.date.timeIntervalSince(submitted) * 1000).rounded())
+        log.notice("Notification timing \(id, privacy: .public) receiveToSubmitMs=\(receiveToSubmit) submitToDeliveryMs=\(submitToDelivery)")
+        notificationTiming = "收包 → 提交成功 \(receiveToSubmit) ms\n提交成功 → 系统投递 \(submitToDelivery) ms"
     }
 
     private func startScan() {
@@ -208,8 +238,9 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor value: CBCharacteristic, error: Error?) {
+        let received = Date()
         guard armed, !processing, peripheral.identifier == peer?.identifier, value.uuid == eventID,
-              let data = value.value, let token = TestAlertPacket.eventID(in: data, now: Date()) else { return }
+              let data = value.value, let token = TestAlertPacket.eventID(in: data, now: received) else { return }
         processing = true
         let restarted = Int(pid) != UserDefaults.standard.integer(forKey: armedPIDKey)
         log.notice("Received \(token.uuidString, privacy: .public) pid=\(self.pid, privacy: .public) restarted=\(restarted, privacy: .public)")
@@ -222,10 +253,14 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
                 try await UNUserNotificationCenter.current().add(
                     UNNotificationRequest(identifier: token.uuidString, content: content, trigger: nil)
                 )
-                guard armed, peripheral.identifier == peer?.identifier else { return }
-                var reply = Data(data[2..<18])
-                reply.append(restarted ? 1 : 0)
-                peripheral.writeValue(reply, for: value, type: .withResponse)
+                let submitted = Date()
+                if armed, peripheral.identifier == peer?.identifier {
+                    var reply = Data(data[2..<18])
+                    reply.append(restarted ? 1 : 0)
+                    peripheral.writeValue(reply, for: value, type: .withResponse)
+                }
+                let sample: [String: Any] = ["id": token.uuidString, "received": received, "submitted": submitted]
+                UserDefaults.standard.set(sample, forKey: notificationTimingKey)
             } catch {
                 finish("系统通知提交失败")
             }
