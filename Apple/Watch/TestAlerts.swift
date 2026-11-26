@@ -38,6 +38,7 @@ final class TestAlerts: NSObject, ObservableObject {
     private var probes: [UUID: DiscoveryProbe] = [:]
     private var probed: Set<UUID> = []
     private var isForeground = false
+    private var broadcastTestActive = false
     private var scanTimeout: Task<Void, Never>?
     private var autoConnectTask: Task<Void, Never>?
     private var notificationTask: Task<Void, Never>?
@@ -49,6 +50,7 @@ final class TestAlerts: NSObject, ObservableObject {
         selection = preferences.string(forKey: selectionKey).flatMap { UUID(uuidString: $0) }
         hasSelection = selection != nil
         notificationCenter.delegate = self
+        broadcastTestActive = preferences.integer(forKey: "broadcastWakeTest.armedPID") != 0
         // Keep this identifier stable so Core Bluetooth can restore the selected connection.
         central = CBCentralManager(delegate: self, queue: nil, options: [
             CBCentralManagerOptionRestoreIdentifierKey: "com.bytereset.unlockpc.watchkitapp.central"
@@ -56,6 +58,7 @@ final class TestAlerts: NSObject, ObservableObject {
     }
 
     func toggleScan() {
+        guard !broadcastTestActive else { return }
         if isScanning {
             stopScan()
             status = "搜索已停止"
@@ -82,6 +85,7 @@ final class TestAlerts: NSObject, ObservableObject {
     func setForeground(_ foreground: Bool) {
         guard foreground != isForeground else { return }
         isForeground = foreground
+        guard !broadcastTestActive else { return }
         if foreground {
             if !hasSelection && central.state == .poweredOn && !isScanning {
                 toggleScan()
@@ -89,6 +93,22 @@ final class TestAlerts: NSObject, ObservableObject {
         } else if isScanning {
             stopScan()
             status = candidates.isEmpty ? "搜索已停止" : "请选择测试电脑"
+        }
+    }
+
+    func setBroadcastTestActive(_ active: Bool) {
+        guard active != broadcastTestActive else { return }
+        broadcastTestActive = active
+        if active {
+            stopScan()
+            if let peer { central.cancelPeripheralConnection(peer) }
+            peer = nil
+        } else if isForeground && central.state == .poweredOn {
+            if hasSelection {
+                reconnectIfNeeded()
+            } else if !isScanning {
+                toggleScan()
+            }
         }
     }
 
@@ -156,7 +176,7 @@ final class TestAlerts: NSObject, ObservableObject {
     }
 
     private func reconnectIfNeeded() {
-        guard central.state == .poweredOn, let selection else { return }
+        guard !broadcastTestActive, central.state == .poweredOn, let selection else { return }
         if let peripheral = peer ?? central.retrievePeripherals(withIdentifiers: [selection]).first {
             attach(peripheral)
         } else {
@@ -334,7 +354,7 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
         _ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?
     ) {
         finishProbe(peripheral, valid: false)
-        guard peripheral.identifier == selection, central.state == .poweredOn else { return }
+        guard !broadcastTestActive, peripheral.identifier == selection, central.state == .poweredOn else { return }
         report("连接中断，等待重新连接", error: error)
         central.connect(peripheral)
     }
