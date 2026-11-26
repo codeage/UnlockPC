@@ -11,7 +11,7 @@ final class TestAlerts: NSObject, ObservableObject {
         let label: String
     }
 
-    @Published private(set) var status = "请选择测试电脑"
+    @Published private(set) var status = "正在准备蓝牙"
     @Published private(set) var candidates: [Candidate] = []
     @Published private(set) var isScanning = false
     @Published private(set) var hasSelection = false
@@ -28,7 +28,9 @@ final class TestAlerts: NSObject, ObservableObject {
     private var selection: UUID?
     private var peer: CBPeripheral?
     private var discovered: [UUID: CBPeripheral] = [:]
+    private var isForeground = false
     private var scanTimeout: Task<Void, Never>?
+    private var autoConnectTask: Task<Void, Never>?
     private var notificationTask: Task<Void, Never>?
     private var lastReceiptTime: ContinuousClock.Instant?
     private var lastBackgroundReceiptTime: ContinuousClock.Instant?
@@ -78,8 +80,14 @@ final class TestAlerts: NSObject, ObservableObject {
         }
     }
 
-    func pauseScan() {
-        if isScanning {
+    func setForeground(_ foreground: Bool) {
+        guard foreground != isForeground else { return }
+        isForeground = foreground
+        if foreground {
+            if !hasSelection && central.state == .poweredOn && !isScanning {
+                toggleScan()
+            }
+        } else if isScanning {
             stopScan()
             status = candidates.isEmpty ? "搜索已停止" : "请选择测试电脑"
         }
@@ -132,6 +140,8 @@ final class TestAlerts: NSObject, ObservableObject {
     private func stopScan() {
         scanTimeout?.cancel()
         scanTimeout = nil
+        autoConnectTask?.cancel()
+        autoConnectTask = nil
         if central.isScanning { central.stopScan() }
         isScanning = false
     }
@@ -220,6 +230,8 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard central.state == .poweredOn else {
             scanTimeout?.cancel()
             scanTimeout = nil
+            autoConnectTask?.cancel()
+            autoConnectTask = nil
             isScanning = false
             status = central.state == .unknown || central.state == .resetting
                 ? "正在准备蓝牙" : "蓝牙不可用，请检查设置"
@@ -227,8 +239,10 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         if hasSelection {
             reconnectIfNeeded()
+        } else if isForeground && !isScanning {
+            toggleScan()
         } else {
-            status = "请选择测试电脑"
+            status = "等待搜索测试电脑"
         }
     }
 
@@ -250,6 +264,17 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
         let label = "\(name) · \(peripheral.identifier.uuidString.suffix(4))"
         discovered[peripheral.identifier] = peripheral
         candidates.append(Candidate(id: peripheral.identifier, label: label))
+        autoConnectTask?.cancel()
+        guard candidates.count == 1 else {
+            status = "找到多台测试电脑，请选择"
+            return
+        }
+        let id = peripheral.identifier
+        autoConnectTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard let self, self.isForeground, self.isScanning, self.candidates.count == 1 else { return }
+            self.select(id)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

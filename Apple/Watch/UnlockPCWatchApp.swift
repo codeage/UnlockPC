@@ -35,7 +35,7 @@ private struct WatchHomeView: View {
                         alerts.toggleScan()
                     }
                 }
-                if !alerts.candidates.isEmpty {
+                if alerts.candidates.count > 1 || (!alerts.isScanning && !alerts.candidates.isEmpty) {
                     Section("选择电脑") {
                         ForEach(alerts.candidates) { candidate in
                             Button(candidate.label) { alerts.select(candidate.id) }
@@ -50,10 +50,7 @@ private struct WatchHomeView: View {
             }
             .navigationTitle("UnlockPC")
         }
-        .onChange(of: scenePhase) { phase in
-            if phase == .background {
-                alerts.pauseScan()
-            }
-        }
+        .onAppear { alerts.setForeground(scenePhase == .active) }
+        .onChange(of: scenePhase) { alerts.setForeground($0 == .active) }
     }
 }
