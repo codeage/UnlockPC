@@ -1,8 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Application
     x:Class="UnlockPC.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:wk="using:WinUIKit"
     >
     <Application.Resources>
         <ResourceDictionary>
@@ -33,6 +34,14 @@
                     <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+
+            <!-- WinUI #8829：弹出下拉框或菜单时恢复标准箭头光标。 -->
+            <Style TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
+                <Setter Property="wk:StaleCursorFix.IsEnabled" Value="True" />
+            </Style>
+            <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
+                <Setter Property="wk:StaleCursorFix.IsEnabled" Value="True" />
+            </Style>
 
         </ResourceDictionary>
     </Application.Resources>
