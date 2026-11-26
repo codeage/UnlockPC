@@ -1,0 +1,55 @@
+name: Build UnlockPC for iPhone and Apple Watch
+
+on:
+  push:
+    branches:
+      - codex/unlockpc-apple-build
+    paths:
+      - Apple/**
+      - .github/workflows/build-apple.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device-build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build both device targets
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -project Apple/UnlockPC.xcodeproj -scheme UnlockPC \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/unlockpc-derived" \
+            CODE_SIGNING_ALLOWED=NO "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" build
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/unlockpc-derived/Build/Products/Release-iphoneos/UnlockPC.app"
+          watch="$app/Watch/UnlockPC Watch.app"
+          for bundle in "$app" "$watch"; do
+            executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$bundle/Info.plist")"
+            test -x "$bundle/$executable"
+          done
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = com.bytereset.unlockpc
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$watch/Info.plist")" = com.bytereset.unlockpc.watchkitapp
+          mkdir -p "$RUNNER_TEMP/unlockpc-device/Payload"
+          cd "$RUNNER_TEMP/unlockpc-device"
+          ditto "$app" Payload/UnlockPC.app
+          zip -qry UnlockPC-unsigned.ipa Payload
+          unzip -tq UnlockPC-unsigned.ipa
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unlockpc-unsigned-device-build
+          path: ${{ runner.temp }}/unlockpc-device/UnlockPC-unsigned.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>UnlockPC</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>UnlockPC 使用蓝牙直接接收你选择的 Windows 电脑发出的提醒。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
+	<key>WKApplication</key>
+	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.bytereset.unlockpc</string>
+	<key>WKRunsIndependentlyOfCompanionApp</key>
+	<true/>
+</dict>
+</plist>
