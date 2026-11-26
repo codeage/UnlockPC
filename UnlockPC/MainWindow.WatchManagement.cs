@@ -337,8 +337,11 @@ public sealed partial class MainWindow
         }
     }
 
-    private void UnlockModeBox_Loaded(object sender, RoutedEventArgs args) =>
+    private void UnlockModeBox_Loaded(object sender, RoutedEventArgs args)
+    {
+        WinUIKit.ComboBoxSizing.SizeToLongestItem(UnlockModeBox);
         WinUIKit.ComboBoxSizing.AttachBehaviors(UnlockModeBox);
+    }
 
     private void UnlockModeBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
