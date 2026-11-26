@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
 
@@ -6,8 +6,7 @@ namespace UnlockPC;
 
 internal sealed class MainWindowPlacement
 {
-    private static readonly string StatePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UnlockPC", "window-placement.json");
+    private static readonly string StatePath = AppDataPaths.WindowPlacement;
 
     private readonly AppWindow _window;
     private Placement _placement;
@@ -25,10 +24,11 @@ internal sealed class MainWindowPlacement
         bool maximized = _placement.Maximized;
         var bounds = new RectInt32(_placement.X, _placement.Y, _placement.Width, _placement.Height);
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
-        int width = Math.Min(bounds.Width, workArea.Width);
-        int height = Math.Min(bounds.Height, workArea.Height);
-        int x = Math.Clamp(bounds.X, workArea.X, workArea.X + workArea.Width - width);
-        int y = Math.Clamp(bounds.Y, workArea.Y, workArea.Y + workArea.Height - height);
+        var sizeLimits = _window.Presenter as OverlappedPresenter;
+        int width = Math.Max(sizeLimits?.PreferredMinimumWidth ?? 0, Math.Min(bounds.Width, workArea.Width));
+        int height = Math.Max(sizeLimits?.PreferredMinimumHeight ?? 0, Math.Min(bounds.Height, workArea.Height));
+        int x = Math.Clamp(bounds.X, workArea.X, workArea.X + Math.Max(0, workArea.Width - width));
+        int y = Math.Clamp(bounds.Y, workArea.Y, workArea.Y + Math.Max(0, workArea.Height - height));
         _window.MoveAndResize(new RectInt32(x, y, width, height));
         _placement = new Placement(x, y, width, height, maximized);
 

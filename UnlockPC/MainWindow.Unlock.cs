@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
+using System.ComponentModel;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Devices.Bluetooth;
@@ -15,9 +17,12 @@ public sealed partial class MainWindow
     private readonly SavedUnlockStore _unlockStore = SavedUnlockStore.ForCurrentUser();
     private string? _savedUnlockDeviceId;
     private bool _hasSavedUnlock;
+    private bool _hasUnlockPassword;
     private bool _needsUnlockCredential;
+    private bool _unlockPasswordPromptPending;
     private (PresenceScan Scan, Action Notify)? _directSignalSubscription;
     private long _lastDirectSignalPoll;
+    private int _directRestoreVersion;
 
     private SavedUnlock? ReadSavedUnlock()
     {
@@ -27,35 +32,48 @@ public sealed partial class MainWindow
             var saved = _unlockStore.Read();
             _savedUnlockDeviceId = saved?.DeviceId;
             _hasSavedUnlock = saved is not null;
+            _hasUnlockPassword = saved?.Password.Length > 0;
             return saved;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or CryptographicException or FormatException)
         {
+            _hasUnlockPassword = false;
             _directUnlockError = "无法读取已保存的自动解锁配置。撤销手表授权后可重新设置。";
             BluetoothLog.Write("direct_unlock_config_read_failed", new { ex.HResult });
             return null;
         }
     }
 
-    private bool RestoreDirectUnlock(PairedWatch watch, PresenceScan scan)
+    private async Task<bool> RestoreDirectUnlockAsync(PairedWatch watch, PresenceScan scan)
     {
+        int version = ++_directRestoreVersion;
         using var saved = ReadSavedUnlock();
         if (saved is null || !IsSameId(saved.DeviceId, watch.Id))
             return false;
 
         try
         {
+            ulong address = saved.BondAddress == 0 ? watch.Address : saved.BondAddress;
+            if (!await scan.StartIrkObservationAsync(address))
+                return false;
+            if (_isClosing || !ReferenceEquals(scan, _scan) || version != _directRestoreVersion)
+                return false;
+            if (saved.BondAddress == 0)
+            {
+                using var current = ReadSavedUnlock();
+                if (current is null || !IsSameId(current.DeviceId, watch.Id))
+                    return false;
+                _unlockStore.Save(watch.Id, address, current.Password);
+            }
             DirectUnlock? broker = null;
             if (_watchRules.AutoUnlock && saved.Password.Length > 0 && ProviderRegistration.IsInstalled())
             {
                 try { broker = DirectUnlock.Restore(saved.Password); }
                 catch (Exception ex) { BluetoothLog.Write("direct_unlock_credential_restore_failed", new { ex.HResult }); }
             }
-            _needsUnlockCredential = _watchRules.AutoUnlock && broker is null;
+            _needsUnlockCredential = _watchRules.AutoUnlock && _hasUnlockPassword && broker is null;
             try
             {
-                if (scan.Read().Irk is null && !scan.StartIrkObservation(saved.Irk))
-                    throw new InvalidOperationException("蓝牙检测未运行。");
                 StartDirectUnlock(broker, watch, scan);
             }
             catch
@@ -65,9 +83,14 @@ public sealed partial class MainWindow
             }
             BluetoothLog.Write("direct_unlock_config_restored");
         }
+        catch (OperationCanceledException) { return false; }
         catch (Exception ex)
         {
-            _directUnlockError = $"无法恢复手表授权（0x{ex.HResult:X8}）。可撤销授权后重新设置。";
+            if (!_isClosing && ReferenceEquals(scan, _scan) && version == _directRestoreVersion)
+            {
+                _directUnlockError = ex is InvalidOperationException ? ex.Message : $"无法恢复手表授权（0x{ex.HResult:X8}）。";
+                UpdateDirectUnlockControls();
+            }
             BluetoothLog.Write("direct_unlock_config_restore_failed", new { ex.HResult });
         }
         return _directWatchWake is not null;
@@ -109,7 +132,9 @@ public sealed partial class MainWindow
         {
             _unlockStore.Delete();
             _hasSavedUnlock = false;
+            _hasUnlockPassword = false;
             _needsUnlockCredential = false;
+            _unlockPasswordPromptPending = false;
             _savedUnlockDeviceId = null;
             _directUnlockError = null;
             BluetoothLog.Write("direct_unlock_config_deleted");
@@ -119,7 +144,7 @@ public sealed partial class MainWindow
             _directUnlockError = $"无法删除自动解锁配置（0x{ex.HResult:X8}）。请重试。";
             BluetoothLog.Write("direct_unlock_config_delete_failed", new { ex.HResult });
         }
-        UpdateDirectUnlockControls(_scan?.Read().Irk is { Matched: > 0 });
+        UpdateDirectUnlockControls();
     }
 
     private void RefreshDirectUnlock(PresenceScan scan, ScanSnapshot snapshot)
@@ -133,14 +158,22 @@ public sealed partial class MainWindow
             {
                 // Keep the periodic check for session changes and authentication timeouts without an advertisement.
                 ProcessDirectSignals(scan, watcher, whileUnlocked: false);
-                UpdateCredentialButton(snapshot.Irk is { Matched: > 0 });
+                UpdateUnlockModeControls();
+                if (_unlockPasswordPromptPending && watcher.IsSessionUnlocked && _watchRules.AutoUnlock &&
+                    _watchBinding is null && !_removingWatch && !_isClosing)
+                {
+                    _unlockPasswordPromptPending = false;
+                    OpenSettings();
+                    RootNavigationView.SelectedItem = WatchManagementItem;
+                    _ = ConfigureWatchAsync(passwordRejected: true);
+                }
                 return;
             }
             StopDirectUnlock();
             UpdateWindowsHelloWake();
         }
 
-        UpdateDirectUnlockControls(snapshot.Irk is { Matched: > 0 });
+        UpdateDirectUnlockControls();
     }
 
     private void ProcessDirectSignals(PresenceScan scan, WatchWake watcher, bool whileUnlocked)
@@ -177,125 +210,162 @@ public sealed partial class MainWindow
         }
     }
 
-    private void UpdateDirectUnlockControls(bool matched)
+    private void UpdateDirectUnlockControls()
     {
-        DirectUnlockButton.Content = _hasSavedUnlock ? "撤销手表授权" : _watchRules.AutoUnlock ? "开启自动解锁…" : "绑定手表…";
-        DirectUnlockButton.IsEnabled = _hasSavedUnlock || matched;
         DirectUnlockStatus.Text = _directUnlockError ?? (_hasSavedUnlock
-            ? "已保存自动解锁。请开始检测绑定的手表以恢复。"
-            : matched
-            ? "已收到 IRK 匹配，可以授权此手表使用高级选项中的规则。"
-            : "请先开启 IRK 换址验证并等待手表匹配。");
-        UpdateCredentialButton(matched);
+            ? _directWatchWake is null ? "已保存手表绑定，等待开始检测。" : "已绑定，正在通过 IRK 服务检测。"
+            : _selectedWatch is null ? "" : "Windows 已配对，等待绑定。");
+        UpdateWatchManagement();
     }
 
-    private void UpdateCredentialButton(bool matched)
+    private void UpdateUnlockModeControls()
     {
-        SetUnlockCredentialButton.Visibility = _watchRules.AutoUnlock && _needsUnlockCredential && _hasSavedUnlock
-            ? Visibility.Visible : Visibility.Collapsed;
-        SetUnlockCredentialButton.IsEnabled = matched && !_promptingForDirectUnlock;
-    }
+        bool canConfigure = _hasSavedUnlock && _watchBinding is null && !_removingWatch && !_promptingForDirectUnlock;
+        bool isOn = _hasSavedUnlock && (_watchRules.AutoUnlock || _watchRules.WakeWithWindowsHello);
+        bool windowsHello = _watchRules.PreferredWindowsHello;
 
-    private async void DirectUnlock_Click(object sender, RoutedEventArgs args)
-    {
-        if (_hasSavedUnlock)
+        bool updating = _updatingWatchRuleControls;
+        _updatingWatchRuleControls = true;
+        try
         {
-            bool clearActiveIrk = _savedUnlockDeviceId is { } id && _lastWatchId is { } lastId && IsSameId(id, lastId);
-            ForgetSavedUnlock();
-            if (clearActiveIrk)
-                _scan?.StopIrkObservation();
-            UpdateWindowsHelloWake();
-            RefreshScan();
-            return;
+            AutoUnlockSwitch.IsEnabled = canConfigure;
+            AutoUnlockSwitch.IsOn = isOn;
+            UnlockModeBox.IsEnabled = canConfigure && isOn;
+            UnlockModeBox.SelectedItem = windowsHello ? WindowsHelloMode : PasswordUnlockMode;
+            PasswordUnlockSettings.Visibility = isOn && !windowsHello ? Visibility.Visible : Visibility.Collapsed;
+            WindowsHelloSettings.Visibility = isOn && windowsHello ? Visibility.Visible : Visibility.Collapsed;
+            SetUnlockCredentialButton.IsEnabled = canConfigure;
+            UnlockCredentialDescription.Text = _hasUnlockPassword ? "输入你当前用于登录 Windows 的密码。"
+                : "输入当前 Windows 登录密码后，才能使用此方式。";
         }
-        await ConfigureWatchAsync();
+        finally { _updatingWatchRuleControls = updating; }
     }
 
     private async void SetUnlockCredential_Click(object sender, RoutedEventArgs args) => await ConfigureWatchAsync();
 
-    private async Task ConfigureWatchAsync()
+    private async Task ConfigureWatchAsync(bool enableAutoUnlock = false, bool passwordRejected = false)
     {
-        if (_promptingForDirectUnlock || _scan is not { } scan || PairedWatchBox.SelectedItem is not PairedWatch watch)
+        if (_promptingForDirectUnlock || _watchBinding is not null || _removingWatch || _isClosing ||
+            _savedUnlockDeviceId is not { } id || WindowRootGrid.XamlRoot is not { } root)
             return;
 
         _promptingForDirectUnlock = true;
         _directUnlockError = null;
-        DirectUnlockButton.IsEnabled = false;
+        UpdateWatchManagement();
         try
         {
-            bool useCredential = _watchRules.AutoUnlock;
-            if (useCredential)
-                DirectUnlock.VerifyAccount();
-            bool installProvider = useCredential && !ProviderRegistration.IsInstalled();
+            DirectUnlock.VerifyAccount();
+            bool shouldEnable = enableAutoUnlock || _watchRules.AutoUnlock;
+            bool installProvider = !ProviderRegistration.IsInstalled();
+            using var identity = WindowsIdentity.GetCurrent();
+            var password = new PasswordBox { Header = "Windows 登录密码", MaxLength = 255 };
+            var error = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };
+            string instructions = passwordRejected
+                ? "Windows 未接受 UnlockPC 保存的密码。请输入当前密码以恢复自动解锁。"
+                : "输入当前 Windows 账户的登录密码。验证后，UnlockPC 会为当前用户加密保存。";
+            if (installProvider)
+                instructions += "\n\n首次设置时，Windows 会要求管理员确认安装登录组件。";
+            if (enableAutoUnlock)
+                instructions += "\n\n蓝牙信号无法确认手表是否佩戴，也无法防止广播重放。";
 
             var dialog = new ContentDialog
             {
-                XamlRoot = DirectUnlockButton.XamlRoot,
-                Title = useCredential ? "授权 Apple Watch 自动解锁？" : "绑定 Apple Watch？",
-                Content = (installProvider ? "首次开启时，Windows 会请求管理员确认以安装登录组件。\n\n" : "") +
-                    (useCredential
-                        ? "蓝牙信号无法确认手表是否佩戴，也无法防止广播重放。手表密钥和密码将为当前 Windows 用户加密保存。"
-                        : "UnlockPC 将加密保存手表密钥，并按高级选项中的自动锁定规则检测信号。"),
-                PrimaryButtonText = "继续",
+                XamlRoot = root,
+                Title = "输入 Windows 登录密码",
+                Content = new StackPanel
+                {
+                    Spacing = 12,
+                    Children =
+                    {
+                        new TextBlock { Text = instructions, TextWrapping = TextWrapping.Wrap },
+                        new TextBlock { Text = identity.Name, TextWrapping = TextWrapping.Wrap },
+                        password,
+                        error
+                    }
+                },
+                PrimaryButtonText = "验证并保存",
                 CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Close
+                DefaultButton = ContentDialogButton.Primary
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || _isClosing || _scan != scan ||
-                scan.Read().Irk is not { Matched: > 0 })
+            DirectUnlock? entered = null;
+            dialog.Opened += (_, _) => password.Focus(FocusState.Programmatic);
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                try { entered = DirectUnlock.Create(password.Password); }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+                {
+                    args.Cancel = true;
+                    error.Message = ex is Win32Exception win32 && DirectUnlock.IsPasswordRejected(win32)
+                        ? "Windows 未接受此密码。请输入当前 Windows 账户的登录密码。"
+                        : ex.Message;
+                    error.IsOpen = true;
+                    password.Focus(FocusState.Programmatic);
+                }
+                finally { password.Password = ""; }
+            };
+
+            ContentDialogResult result;
+            try { result = await dialog.ShowAsync(); }
+            catch
+            {
+                entered?.Dispose();
+                throw;
+            }
+            finally { password.Password = ""; }
+
+            using var broker = entered;
+            if (result != ContentDialogResult.Primary || broker is null || _isClosing)
                 return;
 
             if (installProvider)
             {
                 DirectUnlockStatus.Text = "等待 Windows 确认安装登录组件…";
-                if (!await ProviderRegistration.EnsureInstalledAsync() || _isClosing || _scan != scan ||
-                    scan.Read().Irk is not { Matched: > 0 })
+                if (!await ProviderRegistration.EnsureInstalledAsync() || _isClosing)
                     return;
             }
 
-            nint window = WinRT.Interop.WindowNative.GetWindowHandle(this);
-            DirectUnlock? broker = useCredential ? DirectUnlock.Prompt(window, persist: true) : null;
-            if (useCredential && broker is null)
+            using var saved = ReadSavedUnlock();
+            if (saved is null || !IsSameId(id, saved.DeviceId))
                 return;
-            try
+
+            byte[] clearPassword = broker.CopyPassword();
+            try { _unlockStore.Save(id, saved.BondAddress, clearPassword); }
+            finally { CryptographicOperations.ZeroMemory(clearPassword); }
+
+            _hasUnlockPassword = true;
+            _needsUnlockCredential = false;
+            _unlockPasswordPromptPending = false;
+            BluetoothLog.Write("direct_unlock_config_saved");
+            if (_watchRules.AutoUnlock != shouldEnable)
+                SaveWatchRules(_watchRules with
+                {
+                    AutoUnlock = shouldEnable,
+                    WakeWithWindowsHello = !shouldEnable && _watchRules.WakeWithWindowsHello,
+                    PreferredWindowsHello = !shouldEnable && _watchRules.PreferredWindowsHello
+                });
+            else if (_scan is { } scan && _selectedWatch is { } watch && IsSameId(watch.Id, id))
             {
-                if (_isClosing || _scan != scan || scan.Read() is not { DeviceRemoved: false, Irk.Matched: > 0 } ||
-                    scan.CopyIrk() is not { } irk)
-                {
-                    broker?.Dispose();
-                    return;
-                }
-
-                try
-                {
-                    byte[] password = broker?.CopyPassword() ?? [];
-                    try { _unlockStore.Save(watch.Id, irk, password); }
-                    finally { CryptographicOperations.ZeroMemory(password); }
-                }
-                finally { CryptographicOperations.ZeroMemory(irk); }
-
-                _savedUnlockDeviceId = watch.Id;
-                _hasSavedUnlock = true;
-                _needsUnlockCredential = false;
-                BluetoothLog.Write("direct_unlock_config_saved");
                 StopDirectUnlock();
-                StartDirectUnlock(broker, watch, scan);
+                await RestoreDirectUnlockAsync(watch, scan);
             }
-            catch
-            {
-                broker?.Dispose();
-                throw;
-            }
+            ShowWatchManagementStatus("已保存 Windows 登录密码。", InfoBarSeverity.Success);
         }
         catch (Exception ex)
         {
             if (!_isClosing)
+            {
                 DirectUnlockStatus.Text = _directUnlockError = ex.Message;
+                ShowWatchManagementStatus(ex.Message, InfoBarSeverity.Error);
+            }
         }
         finally
         {
             _promptingForDirectUnlock = false;
             if (!_isClosing)
+            {
+                UpdateWatchManagement();
                 RefreshScan();
+            }
         }
     }
 
@@ -310,13 +380,15 @@ public sealed partial class MainWindow
                 ProcessDirectSignals(scan, current, whileUnlocked: false);
         }
 
-        var watcher = new WatchWake(window, broker, _watchRules, async token =>
+        WatchWake? currentWatcher = null;
+        var watcher = new WatchWake(window, broker, _watchRules,
+            token => WatchConnectionVerification.VerifyAsync(watch, scan.ResolvesAsync, token, RecordLockActivity),
+            RecordLockActivity, ProcessLockedSignals, (since, timedOut) =>
         {
-            if (scan.CopyIrk() is not { } key)
-                return WatchConnectionVerificationResult.Unconfirmed;
-            try { return await WatchConnectionVerification.VerifyAsync(watch, key, token, RecordLockActivity).ConfigureAwait(false); }
-            finally { CryptographicOperations.ZeroMemory(key); }
-        }, RecordLockActivity, ProcessLockedSignals);
+            if (broker is not null && currentWatcher is not null)
+                _ = CheckUnlockPasswordAsync(broker, currentWatcher, watch, scan, since, timedOut);
+        });
+        currentWatcher = watcher;
         _directWatchWake = watcher;
         var dispatcher = DispatcherQueue;
         var signalDispatch = new WatchSignalDispatch(() => watcher.RequestsImmediateSamples,
@@ -327,13 +399,41 @@ public sealed partial class MainWindow
         _lastDirectSignalPoll = Stopwatch.GetTimestamp();
         _unlockedSignalTimer.Start();
         _directUnlockError = null;
-        DirectUnlockButton.Content = "撤销手表授权";
-        DirectUnlockButton.IsEnabled = true;
-        DirectUnlockStatus.Text = "已绑定手表。";
+        UpdateDirectUnlockControls();
+    }
+
+    private async Task CheckUnlockPasswordAsync(DirectUnlock broker, WatchWake watcher, PairedWatch watch,
+        PresenceScan scan, DateTime since, bool timedOut)
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (timedOut || DirectUnlock.WindowsReportedAuthenticationFailure(since))
+                    broker.VerifyPassword();
+            });
+        }
+        catch (Win32Exception ex) when (DirectUnlock.IsPasswordRejected(ex))
+        {
+            if (!_isClosing && _watchRules.AutoUnlock && ReferenceEquals(_directWatchWake, watcher) && ReferenceEquals(_scan, scan))
+            {
+                BluetoothLog.Write("direct_unlock_password_rejected", new { ex.NativeErrorCode });
+                StopDirectUnlock();
+                _needsUnlockCredential = true;
+                _unlockPasswordPromptPending = true;
+                StartDirectUnlock(null, watch, scan);
+                ShowWatchManagementStatus("Windows 未接受已保存的密码。请更新自动解锁密码。", InfoBarSeverity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            BluetoothLog.Write("direct_unlock_password_check_failed", new { ex.HResult });
+        }
     }
 
     private void StopDirectUnlock()
     {
+        _directRestoreVersion++;
         _unlockedSignalTimer.Stop();
         if (_directSignalSubscription is { } subscription)
         {
@@ -342,6 +442,6 @@ public sealed partial class MainWindow
         }
         _directWatchWake?.Dispose();
         _directWatchWake = null;
-        UpdateDirectUnlockControls(matched: false);
+        UpdateDirectUnlockControls();
     }
 }

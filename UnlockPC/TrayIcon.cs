@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -13,7 +13,9 @@ internal sealed class TrayIcon : IDisposable
     private const ushort WmLeftButtonDoubleClick = 0x0203;
     private const ushort NinSelect = 0x0400;
     private const ushort NinKeySelect = 0x0401;
+    private const ushort NinBalloonUserClick = 0x0405;
     private const uint NimAdd = 0;
+    private const uint NimModify = 1;
     private const uint NimDelete = 2;
     private const uint NimSetFocus = 3;
     private const uint NimSetVersion = 4;
@@ -73,6 +75,19 @@ internal sealed class TrayIcon : IDisposable
         return _registered;
     }
 
+    public bool ShowNotification(string title, string message)
+    {
+        if (!EnsureVisible())
+            return false;
+
+        var data = _icon;
+        data.Flags = 0x10 | 0x40; // NIF_INFO | NIF_REALTIME
+        data.InfoTitle = title;
+        data.Info = message;
+        data.InfoFlags = 0x01; // NIIF_INFO
+        return Shell_NotifyIcon(NimModify, ref data);
+    }
+
     public void Dispose()
     {
         if (_registered)
@@ -108,6 +123,7 @@ internal sealed class TrayIcon : IDisposable
                 }
                 case NinSelect:
                 case NinKeySelect:
+                case NinBalloonUserClick:
                 case WmLeftButtonUp:
                 case WmLeftButtonDoubleClick:
                     // Open during the shell callback, while the user's tray input is current.

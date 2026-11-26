@@ -21,7 +21,7 @@ public sealed partial class MainWindow
         if (_isClosing)
             return;
 
-        if (PairedWatchBox.SelectedItem is not PairedWatch watch)
+        if (_selectedWatch is not PairedWatch watch)
         {
             WatchConnectionLiveStatus.Text = "当前连接（Windows）：未选择手表";
             return;
@@ -50,6 +50,7 @@ public sealed partial class MainWindow
                         new { address, previousConnected = previousConnection, connected, observedAt });
                     previousConnection = connected;
                     WatchConnectionLiveStatus.Text = label + (connected ? "已连接" : "未连接");
+                    ShowConnection(connected);
                 });
             }
 
@@ -66,6 +67,7 @@ public sealed partial class MainWindow
                     BluetoothLog.Write("watch_connection_device_removed", new { address, previousConnected = previousConnection });
                     previousConnection = null;
                     WatchConnectionLiveStatus.Text = label + "设备不可用";
+                    ConnectionStatusText.Text = "Windows 蓝牙：设备不可用";
                 });
             };
             watcher.EnumerationCompleted += (_, _) => DispatcherQueue.TryEnqueue(() =>
@@ -101,7 +103,7 @@ public sealed partial class MainWindow
 
     private async void TestWatchConnection_Click(object sender, RoutedEventArgs args)
     {
-        if (PairedWatchBox.SelectedItem is not PairedWatch watch)
+        if (_selectedWatch is not PairedWatch watch)
         {
             ShowWatchConnectionTestStatus("未选择手表", "请先在「在场检测」页选择已配对的手表。", InfoBarSeverity.Warning);
             return;
@@ -258,19 +260,12 @@ public sealed partial class MainWindow
         _updatingWatchRuleControls = true;
         try
         {
-            AutoUnlockSwitch.IsOn = _watchRules.AutoUnlock;
-            WatchWakeSwitch.IsOn = _watchRules.WakeWithWindowsHello;
+            UpdateUnlockModeControls();
             AutoLockSwitch.IsOn = _watchRules.AutoLock;
-            ReturnRssiBox.Value = _watchRules.ReturnRssi;
-            ReturnWindowBox.Value = _watchRules.ReturnWindowSeconds;
-            ReturnPacketCountBox.Value = _watchRules.ReturnPacketCount;
-            WeakRssiBox.Value = _watchRules.WeakRssi;
-            VeryWeakRssiBox.Value = _watchRules.VeryWeakRssi;
-            UnlockDelayBox.Value = _watchRules.UnlockDelaySeconds;
             RequireWatchUnlockedSwitch.IsOn = _watchRules.RequireWatchUnlocked;
             RequireEncryptedConnectionSwitch.IsOn = _watchRules.RequireEncryptedConnection;
             SpeakLockActivitySwitch.IsOn = _watchRules.SpeakLockActivity;
-            UpdateAutoLockRuleDescription();
+            UpdateDebugRuleControls();
         }
         finally { _updatingWatchRuleControls = false; }
     }
@@ -284,13 +279,8 @@ public sealed partial class MainWindow
         {
             nameof(AutoUnlockSwitch) => _watchRules with
             {
-                AutoUnlock = toggle.IsOn,
-                WakeWithWindowsHello = !toggle.IsOn && _watchRules.WakeWithWindowsHello
-            },
-            nameof(WatchWakeSwitch) => _watchRules with
-            {
-                WakeWithWindowsHello = toggle.IsOn,
-                AutoUnlock = !toggle.IsOn && _watchRules.AutoUnlock
+                AutoUnlock = toggle.IsOn && !_watchRules.PreferredWindowsHello,
+                WakeWithWindowsHello = toggle.IsOn && _watchRules.PreferredWindowsHello
             },
             nameof(AutoLockSwitch) => _watchRules with { AutoLock = toggle.IsOn },
             nameof(RequireWatchUnlockedSwitch) => _watchRules with { RequireWatchUnlocked = toggle.IsOn },
@@ -301,30 +291,8 @@ public sealed partial class MainWindow
         SaveWatchRules(rules);
     }
 
-    private void WatchRuleValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
-    {
-        if (_updatingWatchRuleControls)
-            return;
-        if (!double.IsInteger(args.NewValue) || args.NewValue < sender.Minimum || args.NewValue > sender.Maximum)
-        {
-            UpdateWatchRuleControls();
-            ShowWatchRulesStatus("请输入范围内的整数。", InfoBarSeverity.Warning);
-            return;
-        }
-
-        int value = (int)args.NewValue;
-        var rules = sender.Name switch
-        {
-            nameof(ReturnRssiBox) => _watchRules with { ReturnRssi = value },
-            nameof(ReturnWindowBox) => _watchRules with { ReturnWindowSeconds = value },
-            nameof(ReturnPacketCountBox) => _watchRules with { ReturnPacketCount = value },
-            nameof(WeakRssiBox) => _watchRules with { WeakRssi = value },
-            nameof(VeryWeakRssiBox) => _watchRules with { VeryWeakRssi = value },
-            nameof(UnlockDelayBox) => _watchRules with { UnlockDelaySeconds = value },
-            _ => _watchRules
-        };
-        SaveWatchRules(rules);
-    }
+    partial void UpdateDebugRuleControls();
+    partial void SyncDebugRuleStatus();
 
     private void SaveWatchRules(WatchRuleSettings rules)
     {
@@ -350,20 +318,18 @@ public sealed partial class MainWindow
 
         var previous = _watchRules;
         _watchRules = rules;
-        if (previous.AutoUnlock != rules.AutoUnlock || previous.WakeWithWindowsHello != rules.WakeWithWindowsHello)
-            UpdateWatchRuleControls();
-        if (previous.WeakRssi != rules.WeakRssi || previous.VeryWeakRssi != rules.VeryWeakRssi)
-            UpdateAutoLockRuleDescription();
+        UpdateWatchRuleControls();
         if (!rules.SpeakLockActivity)
             StopLockActivitySpeech();
-        WatchRulesStatus.IsOpen = false;
+        WatchRulesStatus.IsOpen = WatchManagementRulesStatus.IsOpen = false;
+        SyncDebugRuleStatus();
         if ((previous with { SpeakLockActivity = rules.SpeakLockActivity }) == rules)
             return;
 
-        if (previous.AutoUnlock != rules.AutoUnlock && _scan is { } scan && PairedWatchBox.SelectedItem is PairedWatch watch)
+        if (previous.AutoUnlock != rules.AutoUnlock && _scan is { } scan && _selectedWatch is PairedWatch watch)
         {
             StopDirectUnlock();
-            RestoreDirectUnlock(watch, scan);
+            _ = RestoreDirectUnlockAsync(watch, scan);
         }
         else
         {
@@ -374,17 +340,11 @@ public sealed partial class MainWindow
         RefreshScan();
     }
 
-    private void UpdateAutoLockRuleDescription()
-    {
-        AutoLockRuleDescription.Text = $"在 18 秒内，至少收到两条间隔达到 3 秒的极弱广播（≤ {_watchRules.VeryWeakRssi} dBm），" +
-            $"或至少三条首尾间隔达到 6 秒的弱广播（≤ {_watchRules.WeakRssi} dBm），且本机连续 10 秒无输入，才会请求锁屏。" +
-            "手表暂时没有广播时保持当前状态。";
-    }
-
     private void ShowWatchRulesStatus(string message, InfoBarSeverity severity)
     {
-        WatchRulesStatus.Message = message;
-        WatchRulesStatus.Severity = severity;
-        WatchRulesStatus.IsOpen = true;
+        WatchRulesStatus.Message = WatchManagementRulesStatus.Message = message;
+        WatchRulesStatus.Severity = WatchManagementRulesStatus.Severity = severity;
+        WatchRulesStatus.IsOpen = WatchManagementRulesStatus.IsOpen = true;
+        SyncDebugRuleStatus();
     }
 }

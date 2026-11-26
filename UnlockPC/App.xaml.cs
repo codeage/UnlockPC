@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using WinUIKit;
 
 namespace UnlockPC;
@@ -44,8 +44,6 @@ public partial class App : Application
                     await _window.RunWatchBroadcastSelfTestAsync();
                 else if (_selfTest == "watch-encryption")
                     await _window.RunWatchEncryptionSelfTestAsync();
-                else
-                    await _window.RunSignInOptionsSelfTestAsync();
             });
             return;
         }
@@ -68,10 +66,9 @@ public partial class App : Application
         };
         _window.DispatcherQueue.TryEnqueue(async () =>
         {
+            await _window.LoadPairedWatchesAsync();
             if (Environment.GetCommandLineArgs().Contains("--pair", StringComparer.Ordinal))
                 await _window.StartPairingAsync();
-            else
-                await _window.LoadPairedWatchesAsync();
         });
     }
 }

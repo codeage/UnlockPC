@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
@@ -19,8 +19,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ProviderDirectory>$(MSBuildProjectDirectory)\..\CredentialProvider</ProviderDirectory>
     <ProviderDll>$(ProviderDirectory)\bin\x64\Release\UnlockPCCredentialProvider.dll</ProviderDll>
+    <IrkServiceDirectory>$(MSBuildProjectDirectory)\..\IrkService</IrkServiceDirectory>
+    <IrkServiceExe>$(IrkServiceDirectory)\bin\x64\Release\UnlockPCIrk.exe</IrkServiceExe>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
+    <DefineConstants>$(DefineConstants);UNLOCKPC_DEBUG_PAGE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)' != 'Debug' or '$(ShippingBuild)' == 'true'">
+    <Compile Remove="MainWindow.Debug.cs" />
+  </ItemGroup>
+  <Target Name="RequireShippingPublish" BeforeTargets="PrepareForPublish"
+          Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
+    <Error Text="Use the Release configuration to publish UnlockPC without the developer page." />
+  </Target>
   <ItemGroup>
+    <None Include="$(IrkServiceExe)" Link="UnlockPCIrk.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
@@ -40,5 +54,17 @@
   <Target Name="RequestUnlockPCExit" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
     <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\scripts\Stop-UnlockPC.ps1&quot; -TargetExe &quot;$(TargetDir)UnlockPC.exe&quot;" />
   </Target>
+  <Target Name="StopIrkService" BeforeTargets="PrepareForBuild" DependsOnTargets="RequestUnlockPCExit"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(DeployIrkService)' != 'false'">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\..\scripts\Deploy-IrkService.ps1&quot; -Phase Stop" />
+  </Target>
+  <Target Name="BuildIrkService" BeforeTargets="PrepareForBuild" DependsOnTargets="StopIrkService"
+          Condition="'$(DesignTimeBuild)' != 'true'"
+          Inputs="$(IrkServiceDirectory)\IrkService.cpp;$(IrkServiceDirectory)\WatchScan.h;$(IrkServiceDirectory)\MonitorLog.h;$(MSBuildProjectDirectory)\..\scripts\Build-IrkService.ps1" Outputs="$(IrkServiceExe)">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\..\scripts\Build-IrkService.ps1&quot;" />
+  </Target>
+  <Target Name="InstallAndStartIrkService" AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(DeployIrkService)' != 'false'">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\..\scripts\Deploy-IrkService.ps1&quot; -Phase Deploy -AppExe &quot;$(TargetDir)UnlockPC.exe&quot;" />
+  </Target>
 </Project>
-

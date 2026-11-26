@@ -1,149 +1,212 @@
-using System.ComponentModel;
+﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Security.AccessControl;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
-using System.Text;
+using Microsoft.Win32.SafeHandles;
 using Windows.Devices.Bluetooth;
 
 namespace UnlockPC;
 
-internal static class BondedIrk
+internal sealed class BondedIrk(NamedPipeClientStream pipe) : IDisposable
 {
-    public static async Task<BondedIrkResult> ReadAsync(ulong deviceAddress)
+    internal const string ServiceName = "UnlockPCIrk";
+    private readonly object _gate = new();
+    private readonly SemaphoreSlim _request = new(1);
+    private readonly Dictionary<ulong, (long Started, Task<bool> Match)> _matches = [];
+    private volatile bool _disposed;
+    public bool IsActive => !_disposed;
+
+    public static async Task<BondedIrk> OpenAsync(ulong deviceAddress, CancellationToken cancellationToken = default)
     {
-        var adapter = await BluetoothAdapter.GetDefaultAsync();
+        var adapter = await BluetoothAdapter.GetDefaultAsync().AsTask(cancellationToken).ConfigureAwait(false);
         if (adapter is null)
-            return new BondedIrkResult(null, "Windows 没有可用的蓝牙适配器。");
+            throw new InvalidOperationException("Windows 没有可用的蓝牙适配器。");
 
-        string requestId = Guid.NewGuid().ToString("N");
-        string pipeName = $"UnlockPC-Irk-{requestId}";
-        string taskName = $"UnlockPC-ReadBond-{requestId}";
-        string registryKey = $@"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Keys\{adapter.BluetoothAddress:x12}\{deviceAddress:x12}";
+        string request = Guid.NewGuid().ToString("N");
+        using var manager = OpenSCManagerW(null, null, 1); // SC_MANAGER_CONNECT
+        if (manager.IsInvalid)
+            throw ServiceError(Marshal.GetLastPInvokeError());
+        using var service = OpenServiceW(manager, ServiceName, 0x14); // SERVICE_START | SERVICE_QUERY_STATUS
+        if (service.IsInvalid)
+            throw ServiceError(Marshal.GetLastPInvokeError());
+        await Task.Run(() => StartMonitor(service, request, cancellationToken), cancellationToken).ConfigureAwait(false);
 
-        using var user = WindowsIdentity.GetCurrent();
-        var pipeSecurity = new PipeSecurity();
-        pipeSecurity.AddAccessRule(new PipeAccessRule(user.User!, PipeAccessRights.FullControl, AccessControlType.Allow));
-        pipeSecurity.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-            PipeAccessRights.FullControl, AccessControlType.Allow));
-        using var pipe = NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous, 64, 0, pipeSecurity);
-
-        string reader = $$"""
-            $ErrorActionPreference = 'Stop'
-            $status = [byte]3
-            $key = $null
-            try {
-                $bond = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('{{registryKey}}')
-                try {
-                    if ($null -ne $bond) { $key = $bond.GetValue('IRK') }
-                } finally {
-                    if ($null -ne $bond) { $bond.Dispose() }
-                }
-                $status = if ($key -is [byte[]] -and $key.Length -eq 16) { [byte]1 } else { [byte]2 }
-            } catch {}
-            $client = [System.IO.Pipes.NamedPipeClientStream]::new('.', '{{pipeName}}', [System.IO.Pipes.PipeDirection]::Out)
-            try {
-                $client.Connect(5000)
-                $client.WriteByte($status)
-                if ($status -eq 1) { $client.Write($key, 0, 16) }
-                $client.Flush()
-            } finally {
-                $client.Dispose()
-                if ($key -is [byte[]]) { [Array]::Clear($key, 0, $key.Length) }
-            }
-            """;
-
-        // The task runs only a fixed registry lookup in Windows PowerShell. The IRK travels through the pipe.
-        string elevated = $$"""
-            $ErrorActionPreference = 'Stop'
-            $taskName = '{{taskName}}'
-            $registered = $false
-            try {
-                $action = New-ScheduledTaskAction -Execute "$PSHOME\powershell.exe" -Argument '-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {{Encode(reader)}}'
-                $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount
-                $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-                Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings | Out-Null
-                $registered = $true
-                $since = (Get-ScheduledTaskInfo -TaskName $taskName).LastRunTime
-                Start-ScheduledTask -TaskName $taskName
-                $clock = [Diagnostics.Stopwatch]::StartNew()
-                do {
-                    Start-Sleep -Milliseconds 250
-                    $task = Get-ScheduledTask -TaskName $taskName
-                    $info = Get-ScheduledTaskInfo -InputObject $task
-                    if ($info.LastRunTime -ne $since -and $task.State -eq 'Ready') { break }
-                } while ($clock.Elapsed.TotalSeconds -lt 30)
-            } finally {
-                if ($registered) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
-            }
-            """;
-
-        using Process? broker = await Task.Run(() => LaunchElevated(elevated));
-        if (broker is null)
-            return new BondedIrkResult(null, "已取消管理员确认。");
-
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(38));
-        var receive = ReceiveAsync(pipe, timeout.Token);
-        await Task.WhenAny(receive, broker.WaitForExitAsync(timeout.Token));
-        if (!receive.IsCompleted)
-            timeout.CancelAfter(TimeSpan.FromSeconds(2));
-
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(7));
+        var connection = new NamedPipeClientStream(".", $"UnlockPC.Irk.Match.{request}",
+            PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.Synchronize,
+            PipeOptions.Asynchronous, TokenImpersonationLevel.Identification, HandleInheritability.None);
         try
         {
-            return await receive;
-        }
-        catch (Exception ex) when (ex is IOException or OperationCanceledException)
-        {
-            return new BondedIrkResult(null, "Windows 配对密钥读取未完成，请检查任务计划程序后重试。");
-        }
-    }
+            await connection.ConnectAsync(timeout.Token).ConfigureAwait(false);
+            if (!GetNamedPipeServerProcessId(connection.SafePipeHandle, out uint server) ||
+                !QueryServiceStatusEx(service, 0, out var status, (uint)Marshal.SizeOf<ServiceStatus>(), out _) ||
+                server == 0 || server != status.ProcessId)
+                throw new InvalidOperationException("无法确认 IRK 服务连接。");
 
-    private static Process? LaunchElevated(string script)
-    {
-        try
-        {
-            return Process.Start(new ProcessStartInfo
+            byte[] addresses = new byte[16];
+            BinaryPrimitives.WriteUInt64LittleEndian(addresses, adapter.BluetoothAddress);
+            BinaryPrimitives.WriteUInt64LittleEndian(addresses.AsSpan(8), deviceAddress);
+            await connection.WriteAsync(addresses, timeout.Token).ConfigureAwait(false);
+            byte[] reply = new byte[1];
+            await connection.ReadExactlyAsync(reply, timeout.Token).ConfigureAwait(false);
+            if (reply[0] == 1)
+                return new BondedIrk(connection);
+
+            await connection.WriteAsync(reply, timeout.Token).ConfigureAwait(false);
+            throw new InvalidOperationException(reply[0] switch
             {
-                FileName = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
-                Arguments = $"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {Encode(script)}",
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden
+                2 => "Windows 没有找到此设备的 IRK。请确认手表已通过当前适配器完成配对。",
+                4 => "IRK 服务已授权另一块手表。请先在 Windows 中解除原手表的配对。",
+                _ => "IRK 服务无法读取此设备的配对密钥。"
             });
         }
-        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return null;
+            connection.Dispose();
+            throw new InvalidOperationException("连接 IRK 服务超时，请重试。");
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
         }
     }
 
-    private static async Task<BondedIrkResult> ReceiveAsync(NamedPipeServerStream pipe, CancellationToken token)
+    internal static bool IsConnectionFromService(string serviceName, SafePipeHandle pipe)
     {
-        await pipe.WaitForConnectionAsync(token);
-        byte[] status = new byte[1];
-        await pipe.ReadExactlyAsync(status, token);
-        if (status[0] == 1)
-        {
-            byte[] key = new byte[16];
-            try
-            {
-                await pipe.ReadExactlyAsync(key, token);
-                return new BondedIrkResult(key, null);
-            }
-            catch
-            {
-                System.Security.Cryptography.CryptographicOperations.ZeroMemory(key);
-                throw;
-            }
-        }
-
-        return new BondedIrkResult(null, status[0] == 2
-            ? "Windows 没有找到此设备的 IRK。请确认手表已通过当前适配器完成配对。"
-            : "Windows 无法读取此设备的配对密钥。");
+        using var manager = OpenSCManagerW(null, null, 1);
+        if (manager.IsInvalid)
+            return false;
+        using var service = OpenServiceW(manager, serviceName, 4); // SERVICE_QUERY_STATUS
+        return !service.IsInvalid && GetNamedPipeServerProcessId(pipe, out uint server) && server != 0 &&
+            QueryServiceStatusEx(service, 0, out var status, (uint)Marshal.SizeOf<ServiceStatus>(), out _) &&
+            server == status.ProcessId;
     }
 
-    private static string Encode(string script) => Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-}
+    public Task<bool> ResolvesAsync(ulong address)
+    {
+        ulong random = address >> 24;
+        if (random >> 22 != 1 || (random & 0x3fffff) is 0 or 0x3fffff)
+            return Task.FromResult(false);
 
-internal readonly record struct BondedIrkResult(byte[]? Key, string? Error);
+        lock (_gate)
+        {
+            if (_disposed)
+                return Task.FromResult(false);
+            long now = Stopwatch.GetTimestamp();
+            if (_matches.TryGetValue(address, out var cached) &&
+                (!cached.Match.IsCompleted || Stopwatch.GetElapsedTime(cached.Started, now) < TimeSpan.FromSeconds(30)))
+                return cached.Match;
+
+            if (_matches.Count >= 256)
+            {
+                var completed = _matches.Where(entry => entry.Value.Match.IsCompleted).MinBy(entry => entry.Value.Started);
+                if (completed.Key == 0)
+                    return Task.FromResult(false);
+                _matches.Remove(completed.Key);
+            }
+            var match = QueryAsync(address);
+            _matches[address] = (now, match);
+            return match;
+        }
+    }
+
+    private async Task<bool> QueryAsync(ulong address)
+    {
+        await _request.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed)
+                return false;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            byte[] request = new byte[8];
+            BinaryPrimitives.WriteUInt64LittleEndian(request, address);
+            await pipe.WriteAsync(request, timeout.Token).ConfigureAwait(false);
+            byte[] result = new byte[1];
+            await pipe.ReadExactlyAsync(result, timeout.Token).ConfigureAwait(false);
+            if (result[0] <= 1)
+                return result[0] == 1;
+            BluetoothLog.Write("irk_monitor_binding_failed");
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            if (!_disposed)
+                BluetoothLog.Write("irk_monitor_connection_failed", new { ex.HResult });
+        }
+        finally { _request.Release(); }
+
+        Dispose();
+        return false;
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            pipe.Dispose();
+            _matches.Clear();
+        }
+    }
+
+    private static void StartMonitor(ServiceHandle service, string request, CancellationToken token)
+    {
+        long started = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            if (StartServiceW(service, 1, [request]))
+                return;
+            int error = Marshal.GetLastPInvokeError();
+            if (error is not (1056 or 1061) || Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(12))
+                throw ServiceError(error);
+            token.WaitHandle.WaitOne(100);
+        }
+    }
+
+    private static InvalidOperationException ServiceError(int error) => new(error switch
+    {
+        5 => "当前 Windows 用户没有访问 IRK 服务的权限。",
+        1060 => "尚未安装 UnlockPC IRK 服务。请完成服务安装后重试。",
+        _ => $"无法启动 UnlockPC IRK 服务（{error}）。"
+    });
+
+    private sealed class ServiceHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        public ServiceHandle() : base(ownsHandle: true) { }
+        protected override bool ReleaseHandle() => CloseServiceHandle(handle);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ServiceStatus
+    {
+        public uint ServiceType, CurrentState, ControlsAccepted, Win32ExitCode, ServiceExitCode, CheckPoint, WaitHint, ProcessId, Flags;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern ServiceHandle OpenSCManagerW(string? machine, string? database, uint access);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern ServiceHandle OpenServiceW(ServiceHandle manager, string name, uint access);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool StartServiceW(ServiceHandle service, uint count,
+        [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr)] string[] args);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryServiceStatusEx(ServiceHandle service, int level, out ServiceStatus status, uint size, out uint needed);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint processId);
+
+    [DllImport("advapi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseServiceHandle(nint handle);
+}

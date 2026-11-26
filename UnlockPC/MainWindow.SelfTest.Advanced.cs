@@ -18,11 +18,17 @@ public sealed partial class MainWindow
                 throw new InvalidOperationException("导航未切换至高级选项。");
 
             var legacy = new WatchRuleSettings(true, true, -57, 3, 2);
-            if (_watchRules != legacy || SpeakLockActivitySwitch.IsOn ||
-                ReturnRssiBox.Value != -57 || ReturnWindowBox.Value != 3 || ReturnPacketCountBox.Value != 2 ||
-                WeakRssiBox.Value != -75 || VeryWeakRssiBox.Value != -85 || UnlockDelayBox.Value != 0)
+            if (_watchRules != legacy || SpeakLockActivitySwitch.IsOn)
                 throw new InvalidOperationException("无法恢复旧版已保存的阈值。");
+#if UNLOCKPC_DEBUG_PAGE
+            if (_returnRssiBox.Value != -57 || _returnWindowBox.Value != 3 || _returnPacketCountBox.Value != 2 ||
+                _weakRssiBox.Value != -75 || _veryWeakRssiBox.Value != -85 || _unlockDelayBox.Value != 0)
+                throw new InvalidOperationException("调试页未加载已保存的阈值。");
+#endif
 
+            RootNavigationView.SelectedItem = WatchManagementItem;
+            _hasSavedUnlock = true;
+            UpdateUnlockModeControls();
             ((IToggleProvider)new ToggleSwitchAutomationPeer(RequireWatchUnlockedSwitch)).Toggle();
             var firstChange = legacy with { RequireWatchUnlocked = true };
             if (!await WaitForSelfTestAsync(() => _watchRules == firstChange) || _watchRuleStore.Read() != firstChange)
@@ -33,6 +39,7 @@ public sealed partial class MainWindow
             if (!await WaitForSelfTestAsync(() => _watchRules == secondChange) || _watchRuleStore.Read() != secondChange)
                 throw new InvalidOperationException("加密连接开关未自动保存。");
 
+            RootNavigationView.SelectedItem = AdvancedItem;
             ((IToggleProvider)new ToggleSwitchAutomationPeer(SpeakLockActivitySwitch)).Toggle();
             var speechChange = secondChange with { SpeakLockActivity = true };
             if (!await WaitForSelfTestAsync(() => _watchRules == speechChange) || _watchRuleStore.Read() != speechChange)
@@ -40,14 +47,18 @@ public sealed partial class MainWindow
 
             AutoUnlockSwitch.IsOn = false;
             AutoLockSwitch.IsOn = false;
-            ReturnRssiBox.Value = -55;
-            ReturnWindowBox.Value = 4;
-            ReturnPacketCountBox.Value = 3;
-            WeakRssiBox.Value = -82;
-            VeryWeakRssiBox.Value = -91;
-            UnlockDelayBox.Value = 5;
-            var expected = new WatchRuleSettings(false, false, -55, 4, 3, true, true, true,
-                WeakRssi: -82, VeryWeakRssi: -91, UnlockDelaySeconds: 5);
+            var expected = speechChange with { AutoUnlock = false, AutoLock = false };
+#if UNLOCKPC_DEBUG_PAGE
+            ShowDebugPage();
+            _returnRssiBox.Value = -55;
+            _returnWindowBox.Value = 4;
+            _returnPacketCountBox.Value = 3;
+            _weakRssiBox.Value = -82;
+            _veryWeakRssiBox.Value = -91;
+            _unlockDelayBox.Value = 5;
+            expected = expected with { ReturnRssi = -55, ReturnWindowSeconds = 4, ReturnPacketCount = 3,
+                WeakRssi = -82, VeryWeakRssi = -91, UnlockDelaySeconds = 5 };
+#endif
             if (!await WaitForSelfTestAsync(() => _watchRules == expected) || _watchRuleStore.Read() != expected)
                 throw new InvalidOperationException("无法自动保存锁定、解锁和数字选项。");
 
@@ -55,13 +66,17 @@ public sealed partial class MainWindow
             try
             {
                 reopened.Activate();
-                if (reopened._watchRules != expected || reopened.ReturnRssiBox.Value != -55 ||
-                    reopened.ReturnWindowBox.Value != 4 || reopened.ReturnPacketCountBox.Value != 3 ||
+                if (reopened._watchRules != expected ||
                     !reopened.RequireWatchUnlockedSwitch.IsOn || !reopened.RequireEncryptedConnectionSwitch.IsOn ||
-                    !reopened.SpeakLockActivitySwitch.IsOn || reopened.WeakRssiBox.Value != -82 ||
-                    reopened.VeryWeakRssiBox.Value != -91 || reopened.UnlockDelayBox.Value != 5 ||
-                    !reopened.AutoLockRuleDescription.Text.Contains("-91 dBm", StringComparison.Ordinal))
+                    !reopened.SpeakLockActivitySwitch.IsOn)
                     throw new InvalidOperationException("重新打开时未恢复高级设置。");
+#if UNLOCKPC_DEBUG_PAGE
+                if (reopened._returnRssiBox.Value != -55 || reopened._returnWindowBox.Value != 4 ||
+                    reopened._returnPacketCountBox.Value != 3 || reopened._weakRssiBox.Value != -82 ||
+                    reopened._veryWeakRssiBox.Value != -91 || reopened._unlockDelayBox.Value != 5 ||
+                    !reopened._debugLockRuleDescription.Text.Contains("-91 dBm", StringComparison.Ordinal))
+                    throw new InvalidOperationException("重新打开时未恢复调试参数。");
+#endif
             }
             finally { reopened.Close(); }
 
@@ -86,7 +101,8 @@ public sealed partial class MainWindow
             var watches = await PairedWatch.ListAsync();
             var watch = watches.FirstOrDefault(candidate => IsSameId(candidate.Id, saved.DeviceId))
                 ?? throw new InvalidOperationException("找不到已授权的配对手表。");
-            var result = await WatchConnectionVerification.VerifyAsync(watch, saved.Irk, CancellationToken.None, waitForCleanup: true);
+            using var monitor = await BondedIrk.OpenAsync(saved.BondAddress == 0 ? watch.Address : saved.BondAddress);
+            var result = await WatchConnectionVerification.VerifyAsync(watch, monitor.ResolvesAsync, CancellationToken.None, waitForCleanup: true);
             if (result == WatchConnectionVerificationResult.Unconfirmed)
                 throw new InvalidOperationException("未通过已配对手表的蓝牙连接验证。");
             BluetoothLog.Write("ui_self_test_passed", new { test = "watch-encryption", verification = result.ToString() });

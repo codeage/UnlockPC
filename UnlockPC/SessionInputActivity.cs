@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Windows.Gaming.Input;
 
@@ -45,12 +45,9 @@ internal sealed class SessionInputActivity : IDisposable
 
     public TimeSpan? GetIdleTime(long now)
     {
-        var input = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
-        if (!GetLastInputInfo(ref input))
+        if (GetWindowsIdleTime() is not { } idle)
             return null;
 
-        uint milliseconds = unchecked((uint)Environment.TickCount - input.Tick);
-        TimeSpan idle = milliseconds > int.MaxValue ? TimeSpan.Zero : TimeSpan.FromMilliseconds(milliseconds);
         if (_lastDeviceInput != 0)
         {
             var deviceIdle = Stopwatch.GetElapsedTime(_lastDeviceInput, now);
@@ -58,6 +55,16 @@ internal sealed class SessionInputActivity : IDisposable
                 idle = deviceIdle;
         }
         return idle;
+    }
+
+    internal static TimeSpan? GetWindowsIdleTime()
+    {
+        var input = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        if (!GetLastInputInfo(ref input))
+            return null;
+
+        uint milliseconds = unchecked((uint)Environment.TickCount - input.Tick);
+        return milliseconds <= int.MaxValue ? TimeSpan.FromMilliseconds(milliseconds) : null;
     }
 
     public void SampleControllers()

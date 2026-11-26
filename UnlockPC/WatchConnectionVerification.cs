@@ -17,11 +17,11 @@ internal static class WatchConnectionVerification
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan TraceFlushInterval = TimeSpan.FromMilliseconds(100);
 
-    internal static Task<WatchConnectionVerificationResult> VerifyAsync(PairedWatch watch, byte[] irk, CancellationToken cancellationToken,
+    internal static Task<WatchConnectionVerificationResult> VerifyAsync(PairedWatch watch, Func<ulong, Task<bool>> resolves, CancellationToken cancellationToken,
         Action<LockActivityEvent>? recordActivity = null, bool waitForCleanup = false)
     {
         var result = new TaskCompletionSource<WatchConnectionVerificationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var cleanup = VerifyAndReleaseAsync(watch, irk, cancellationToken, recordActivity, result);
+        var cleanup = VerifyAndReleaseAsync(watch, resolves, cancellationToken, recordActivity, result);
         return waitForCleanup ? AwaitCleanupAsync() : result.Task;
 
         async Task<WatchConnectionVerificationResult> AwaitCleanupAsync()
@@ -31,7 +31,7 @@ internal static class WatchConnectionVerification
         }
     }
 
-    private static async Task VerifyAndReleaseAsync(PairedWatch watch, byte[] irk, CancellationToken cancellationToken,
+    private static async Task VerifyAndReleaseAsync(PairedWatch watch, Func<ulong, Task<bool>> resolves, CancellationToken cancellationToken,
         Action<LockActivityEvent>? recordActivity, TaskCompletionSource<WatchConnectionVerificationResult> result)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -97,7 +97,6 @@ internal static class WatchConnectionVerification
 
             stage = "starting_trace";
             started = Stopwatch.GetTimestamp();
-            using var resolver = new IrkResolver(irk);
             string traceName = $"UnlockPC-WatchVerification-{Environment.ProcessId}-{Guid.NewGuid():N}";
             using var trace = new TraceEventSession(traceName);
             trace.EnableProvider(BluetoothPort, TraceEventLevel.Informational);
@@ -214,7 +213,7 @@ internal static class WatchConnectionVerification
                         watchHandle = null;
 
                     ulong address = BinaryPrimitives.ReadUInt64LittleEndian(packet[6..]) >> 16;
-                    bool matches = packet[7] == 1 ? resolver.Resolves(address) || address == watch.Address
+                    bool matches = packet[7] == 1 ? address == watch.Address || resolves(address).GetAwaiter().GetResult()
                         : packet[7] is 0 or 2 or 3 && address == watch.Address;
                     if (packet[6] == 0 && matches)
                     {

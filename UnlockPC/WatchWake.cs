@@ -25,10 +25,13 @@ internal sealed class WatchWake : IDisposable
     private readonly WatchApproach _approach = new(2);
     private readonly WatchLockPolicy _lockPolicy = new();
     private readonly WatchResumeState _resume = new();
+    private readonly Action? _onPowerResume;
+    private readonly Action? _onPowerSuspend;
     private readonly DirectUnlock? _directUnlock;
     private readonly Func<CancellationToken, Task<WatchConnectionVerificationResult>>? _verifyConnection;
     private readonly Action<LockActivityEvent>? _recordActivity;
     private readonly Action? _onVerificationCompleted;
+    private readonly Action<DateTime, bool>? _onSubmittedUnlockFinished;
     private readonly bool _directMode;
     private readonly SessionInputActivity _inputActivity = new();
     private DispatcherQueueTimer? _controllerTimer;
@@ -58,16 +61,21 @@ internal sealed class WatchWake : IDisposable
     internal bool IsSuspended => _resume.IsSuspended;
     internal bool IsSessionUnlocked => _locked == false && !_resume.IsPending;
     internal bool RequestsImmediateSamples => Volatile.Read(ref _immediateSamples);
+    internal TimeSpan? GetInputIdleTime(long now) => _inputActivity.GetIdleTime(now);
 
     public WatchWake(nint window, DirectUnlock? directUnlock = null, WatchRuleSettings? rules = null,
         Func<CancellationToken, Task<WatchConnectionVerificationResult>>? verifyConnection = null, Action<LockActivityEvent>? recordActivity = null,
-        Action? onVerificationCompleted = null)
+        Action? onVerificationCompleted = null, Action<DateTime, bool>? onSubmittedUnlockFinished = null,
+        Action? onPowerResume = null, Action? onPowerSuspend = null)
     {
         _window = window;
         _directUnlock = directUnlock;
         _verifyConnection = verifyConnection;
         _recordActivity = recordActivity;
         _onVerificationCompleted = onVerificationCompleted;
+        _onPowerResume = onPowerResume;
+        _onPowerSuspend = onPowerSuspend;
+        _onSubmittedUnlockFinished = onSubmittedUnlockFinished;
         _directMode = directUnlock is not null || rules is not null;
         _lockPolicy.Reset(Stopwatch.GetTimestamp());
         _proc = WindowProc;
@@ -138,6 +146,21 @@ internal sealed class WatchWake : IDisposable
             _controllerTimer?.Stop();
             _inputActivity.Dispose();
         }
+    }
+
+    internal void ResetDetection()
+    {
+        FinishActivity("检测数据已重新初始化，本轮结束。");
+        CancelAuthentication();
+        long now = Stopwatch.GetTimestamp();
+        _lockPolicy.Reset(now);
+        _approach.Reset(now);
+        _automaticLockPending = false;
+        _lockRequestedAt = 0;
+        _directAttempted = false;
+        _lastWake = 0;
+        _wakeResult = null;
+        PublishSampleMode();
     }
 
     public string Update(long now, long nearSample, bool interrupted, ReadOnlySpan<WatchSignalSample> unlockSamples = default,
@@ -327,6 +350,7 @@ internal sealed class WatchWake : IDisposable
         {
             if (_lastWake != 0 && Stopwatch.GetElapsedTime(_lastWake, now) > UnlockObservation)
             {
+                ReportSubmittedUnlockFinished(now, timedOut: true);
                 _lastWake = 0;
                 _wakeResult = "未收到 Windows 解锁通知。";
                 FinishActivity(_wakeResult);
@@ -431,6 +455,12 @@ internal sealed class WatchWake : IDisposable
         _directUnlock?.Cancel();
     }
 
+    private void ReportSubmittedUnlockFinished(long now, bool timedOut)
+    {
+        if (_directAttempted && _lastWake != 0 && _directUnlock is { } broker && broker.LastCredentialSent >= _lastWake)
+            _onSubmittedUnlockFinished?.Invoke(DateTime.UtcNow - Stopwatch.GetElapsedTime(_lastWake, now), timedOut);
+    }
+
     private void ReportSignalChange(long now, ReadOnlySpan<WatchSignalSample> samples)
     {
         if (samples.IsEmpty)
@@ -508,6 +538,7 @@ internal sealed class WatchWake : IDisposable
                 _automaticLockPending = false;
                 _resume.ClearSession();
                 CancelAuthentication();
+                ReportSubmittedUnlockFinished(now, timedOut: false);
                 if (_activityInProgress)
                     FinishActivity("Windows 确认会话已解锁。");
                 else
@@ -556,6 +587,7 @@ internal sealed class WatchWake : IDisposable
         {
             FinishActivity("Windows 进入睡眠，本轮结束。");
             _resume.Suspend();
+            _onPowerSuspend?.Invoke();
             _automaticLockPending = false;
             _lockRequestedAt = 0;
             CancelAuthentication();
@@ -575,6 +607,8 @@ internal sealed class WatchWake : IDisposable
                 _lastWake = 0;
                 CancelAuthentication();
                 _lockPolicy.Reset(now);
+                _approach.Reset(now);
+                _onPowerResume?.Invoke();
                 PublishSampleMode();
                 BluetoothLog.Write("direct_system_resumed");
             }

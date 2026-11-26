@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using System.Diagnostics.Eventing.Reader;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
@@ -14,20 +14,12 @@ public sealed partial class MainWindow
     private CancellationTokenSource? _pairing;
     private bool _isClosing;
 
-    private async void StartPairing_Click(object sender, RoutedEventArgs args) => await StartPairingAsync();
-
-    internal async Task StartPairingAsync()
+    private async Task<PairedWatch?> PairWatchAsync(Action<string> report, CancellationToken cancellationToken)
     {
-        if (_pairing is not null || _isClosing || _removingWatch)
-            return;
-
         DateTime startedUtc = DateTime.UtcNow;
-        using var lifetime = new CancellationTokenSource();
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _pairing = lifetime;
-        PairButton.IsEnabled = false;
-        UpdateRemoveWatchButton();
-        CancelPairButton.Visibility = Visibility.Visible;
-        PairingStatus.Text = "正在启动蓝牙配对广播…";
+        report("正在启动蓝牙配对广播…");
 
         string attempt = Guid.NewGuid().ToString("N");
         BluetoothLog.Write("pairing_started", new { attempt, windowSeconds = PairingDuration.TotalSeconds });
@@ -41,15 +33,14 @@ public sealed partial class MainWindow
         EventLogWatcher? resultWatcher = null;
         WindowsPairingEvent? systemResult = null;
         bool resultFeedAvailable = false;
-        var selected = PairedWatchBox.SelectedItem as PairedWatch;
         try
         {
             var baseline = await ReadPairedWatchesAsync(attempt, "baseline", lifetime.Token);
             lifetime.Token.ThrowIfCancellationRequested();
             if (baseline is null)
             {
-                PairingStatus.Text = "无法读取 Windows 配对记录，未能启动配对确认。";
-                return;
+                report("无法读取 Windows 配对记录，未能启动配对确认。");
+                return pairedWatch;
             }
 
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -59,8 +50,8 @@ public sealed partial class MainWindow
             BluetoothLog.Write("pairing_adapter", new { attempt, available = adapter is not null, ble = adapter?.IsLowEnergySupported, peripheral = adapter?.IsPeripheralRoleSupported });
             if (adapter is null || !adapter.IsLowEnergySupported || !adapter.IsPeripheralRoleSupported)
             {
-                PairingStatus.Text = "当前蓝牙适配器不可用或不支持 BLE 外设模式。";
-                return;
+                report("当前蓝牙适配器不可用或不支持 BLE 外设模式。");
+                return pairedWatch;
             }
 
             try
@@ -94,7 +85,7 @@ public sealed partial class MainWindow
             }
 
             if (!await OpenAdvertisingAsync(discoverable: true, token))
-                return;
+                return pairedWatch;
 
             bool triedCompatibilityMode = false;
             string? firstFailure = null;
@@ -119,8 +110,8 @@ public sealed partial class MainWindow
                     if (pairedWatch is not null)
                     {
                         BluetoothLog.Write("pairing_new_windows_record", new { attempt, address = BluetoothLog.AddressLabel(pairedWatch.Address) });
-                        PairingStatus.Text = $"Windows 已完成配对：{pairedWatch.Name}。";
-                        return;
+                        report($"Windows 已完成配对：{pairedWatch.Name}。");
+                        return pairedWatch;
                     }
 
                     windowsLookup = null;
@@ -134,33 +125,32 @@ public sealed partial class MainWindow
                     lifetime.Token.ThrowIfCancellationRequested();
                     if (current is null)
                     {
-                        PairingStatus.Text = "配对窗口已关闭，暂时无法确认 Windows 配对状态。";
-                        return;
+                        report("配对窗口已关闭，暂时无法确认 Windows 配对状态。");
+                        return pairedWatch;
                     }
 
                     pairedWatch = PairedWatch.FindPairingResult(baseline, current, peers.Keys);
                     if (pairedWatch is not null)
                     {
                         BluetoothLog.Write("pairing_new_windows_record", new { attempt, address = BluetoothLog.AddressLabel(pairedWatch.Address) });
-                        PairingStatus.Text = $"Windows 已完成配对：{pairedWatch.Name}。";
-                        return;
+                        report($"Windows 已完成配对：{pairedWatch.Name}。");
+                        return pairedWatch;
                     }
 
                     bool hasExistingWatch = current.Any(watch => watch.HasWatchName);
                     BluetoothLog.Write("pairing_confirmation_timeout", new { attempt, hasExistingWatch, gattPeers = peers.Count });
-                    PairingStatus.Text = hasExistingWatch
+                    report(hasExistingWatch
                         ? "本轮未确认新配对。Windows 仍有手表的配对记录，可在已配对设备中选择。"
-                        : "本轮未确认新配对。请完成 Windows 的配对提示后重试。";
-                    return;
+                        : "本轮未确认新配对。请完成 Windows 的配对提示后重试。");
+                    return pairedWatch;
                 }
 
                 if (status is GattServiceProviderAdvertisementStatus.Started or GattServiceProviderAdvertisementStatus.StartedWithoutAllAdvertisementData)
                 {
                     wasAdvertising = true;
                     interruptedSince = null;
-                    PairingStatus.Text = $"请在手表「设置 → 蓝牙」里选择这台电脑（{Environment.MachineName}），然后完成 Windows 的配对提示。剩余 {Math.Ceiling((PairingDuration - elapsed).TotalSeconds):0} 秒。";
-                    if (!resultFeedAvailable)
-                        PairingStatus.Text += " 当前无法读取 Windows 配对结果事件。";
+                    report($"等待 Windows 完成配对 · 剩余 {Math.Ceiling((PairingDuration - elapsed).TotalSeconds):0} 秒。" +
+                        (resultFeedAvailable ? "" : " 当前无法读取 Windows 配对结果事件。"));
                 }
                 else
                 {
@@ -177,8 +167,8 @@ public sealed partial class MainWindow
                         string detail = error < 0 ? status.ToString() : ((BluetoothError)error).ToString();
                         if (blocked || triedCompatibilityMode)
                         {
-                            PairingStatus.Text = $"Windows 未能开启配对广播（{(blocked ? detail : firstFailure ?? detail)}）。";
-                            return;
+                            report($"Windows 未能开启配对广播（{(blocked ? detail : firstFailure ?? detail)}）。");
+                            return pairedWatch;
                         }
 
                         BluetoothLog.Write("pairing_advertising_retry", new { attempt, previousStatus = status.ToString(), error, wasAdvertising });
@@ -191,14 +181,14 @@ public sealed partial class MainWindow
                         using var retry = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
                         retry.CancelAfter(StartupTimeout);
                         if (!await OpenAdvertisingAsync(discoverable: false, retry.Token))
-                            return;
+                            return pairedWatch;
 
                         attemptStarted = System.Diagnostics.Stopwatch.GetTimestamp();
                         wasAdvertising = false;
                         interruptedSince = null;
                     }
 
-                    PairingStatus.Text = "正在启动蓝牙配对广播…";
+                    report("正在启动蓝牙配对广播…");
                 }
 
                 // A watch can complete bonding without reading or subscribing to a GATT characteristic.
@@ -218,23 +208,23 @@ public sealed partial class MainWindow
             {
                 BluetoothLog.Write("pairing_cancelled", new { attempt, byUser = lifetime.IsCancellationRequested, closing = _isClosing });
                 if (!_isClosing)
-                    PairingStatus.Text = lifetime.IsCancellationRequested ? "配对窗口已关闭。" : "启动蓝牙配对广播超时。";
+                    report(lifetime.IsCancellationRequested ? "配对窗口已关闭。" : "启动蓝牙配对广播超时。");
             }
         }
         catch (Exception ex)
         {
             BluetoothLog.Write("pairing_exception", new { attempt, type = ex.GetType().Name, hresult = $"0x{ex.HResult:X8}" });
             if (!_isClosing)
-                PairingStatus.Text = $"无法开始蓝牙配对（0x{ex.HResult:X8}）。";
+                report($"无法开始蓝牙配对（0x{ex.HResult:X8}）。");
         }
         finally
         {
             resultWatcher?.Dispose();
             CloseAdvertising();
-            if (systemResult?.Succeeded == true && pairedWatch is null && !_isClosing)
+            if (systemResult?.Succeeded == true && pairedWatch is null && !_isClosing && !cancellationToken.IsCancellationRequested)
             {
                 // The association event can arrive before the paired endpoint exposes its address.
-                var devices = await ReadPairedWatchesAsync(attempt, "confirmed", CancellationToken.None);
+                var devices = await ReadPairedWatchesAsync(attempt, "confirmed", cancellationToken);
                 pairedWatch = devices?.FirstOrDefault(watch => systemResult.MatchesId(watch.Id));
             }
             lifetime.Cancel();
@@ -243,24 +233,13 @@ public sealed partial class MainWindow
             if (!_isClosing)
             {
                 if (systemResult is not null)
-                    PairingStatus.Text = systemResult.Succeeded
-                        ? pairedWatch is null ? "Windows 已完成配对。暂未读到手表地址，请刷新已配对设备。" : $"Windows 已完成配对：{pairedWatch.Name}。"
-                        : systemResult.FailureMessage();
-                PairButton.IsEnabled = true;
-                UpdateRemoveWatchButton();
-                CancelPairButton.Visibility = Visibility.Collapsed;
-                if (pairedWatch is not null)
-                {
-                    if (_scan is not null)
-                        EndScan();
-                    await LoadPairedWatchesAsync(pairedWatch);
-                }
-                else if (_scan is null && PairedWatchBox.ItemsSource is null)
-                {
-                    await LoadPairedWatchesAsync(autoStart: false);
-                }
+                    report(systemResult.Succeeded
+                        ? pairedWatch is null ? "Windows 已完成配对。暂未读到手表地址，请重试。" : $"Windows 已完成配对：{pairedWatch.Name}。"
+                        : systemResult.FailureMessage());
             }
         }
+
+        return pairedWatch;
 
         async void OnWindowsResult(WindowsPairingEvent result, PairedWatch[] baseline)
         {
@@ -273,8 +252,8 @@ public sealed partial class MainWindow
             }
             var known = baseline.FirstOrDefault(watch => result.MatchesId(watch.Id));
             var target = known;
-            bool matches = result.MatchesId(selected?.Id) || peers.Keys.Any(result.MatchesId) ||
-                (known?.HasWatchName == true && (selected is null || baseline.Count(w => w.HasWatchName) == 1));
+            bool matches = peers.Keys.Any(result.MatchesId) ||
+                (known?.HasWatchName == true && baseline.Count(w => w.HasWatchName) == 1);
             if (known is null && (!matches || result.Succeeded))
             {
                 // A first pairing can fail before there is a paired record or an encrypted GATT read.
@@ -302,7 +281,7 @@ public sealed partial class MainWindow
                 systemResult = result;
                 if (result.Succeeded)
                     pairedWatch = target;
-                PairingStatus.Text = result.Succeeded ? "Windows 已完成配对。" : result.FailureMessage();
+                report(result.Succeeded ? "Windows 已完成配对。" : result.FailureMessage());
                 lifetime.Cancel();
             }
         }
@@ -314,7 +293,7 @@ public sealed partial class MainWindow
             BluetoothLog.Write("pairing_gatt_service", new { attempt, discoverable, result = service.Error.ToString() });
             if (service.Error != BluetoothError.Success)
             {
-                PairingStatus.Text = $"无法打开蓝牙配对服务（{service.Error}）。";
+                report($"无法打开蓝牙配对服务（{service.Error}）。");
                 return false;
             }
 
@@ -338,7 +317,7 @@ public sealed partial class MainWindow
             BluetoothLog.Write("pairing_gatt_characteristics", new { attempt, measurement = measurementResult.Error.ToString(), location = locationResult.Error.ToString() });
             if (measurementResult.Error != BluetoothError.Success || locationResult.Error != BluetoothError.Success)
             {
-                PairingStatus.Text = "无法初始化蓝牙配对服务的特征。";
+                report("无法初始化蓝牙配对服务的特征。");
                 return false;
             }
 
@@ -448,5 +427,4 @@ public sealed partial class MainWindow
         }
     }
 
-    private void StopPairing_Click(object sender, RoutedEventArgs args) => _pairing?.Cancel();
 }

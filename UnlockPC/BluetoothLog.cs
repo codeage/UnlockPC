@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 
 namespace UnlockPC;
@@ -7,10 +7,22 @@ internal static class BluetoothLog
 {
     private static readonly object Gate = new();
     private static readonly string PathName = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UnlockPC", "Logs",
+        AppDataPaths.Logs,
         $"bluetooth-{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.jsonl");
     private static readonly Dictionary<ulong, int> AddressLabels = new();
     private static bool _unavailable;
+
+    internal static string[] ListFiles() => Directory.Exists(AppDataPaths.Logs)
+        ? Directory.GetFiles(AppDataPaths.Logs, "bluetooth-*.jsonl") : [];
+
+    internal static void ClearFiles()
+    {
+        lock (Gate)
+        {
+            foreach (string file in ListFiles())
+                File.Delete(file);
+        }
+    }
 
     internal static int AddressLabel(ulong address)
     {

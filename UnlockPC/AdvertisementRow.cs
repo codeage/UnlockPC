@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -6,7 +6,8 @@ using Windows.Storage.Streams;
 
 namespace UnlockPC;
 
-internal sealed record AdvertisementRow(long Sequence, bool IsMatch, string Heading, string Summary, string Payload)
+internal sealed record AdvertisementRow(long Sequence, bool IsMatch, string Heading, string Summary, string Payload,
+    bool WindowsMatch = false, DateTimeOffset SeenAt = default, short Rssi = 0)
 {
     private const int PayloadPreviewBytes = 48;
 
@@ -28,7 +29,35 @@ internal sealed record AdvertisementRow(long Sequence, bool IsMatch, string Head
 
         string heading = $"{name} · {address}{addressType}";
         string summary = $"{args.Timestamp.ToLocalTime():HH:mm:ss.fff} · {signal} · {PacketTypeLabel(args.AdvertisementType)} · {match}";
-        return new AdvertisementRow(sequence, windowsMatch || irkMatch, heading, summary, DescribePayload(advertisement, out watchFields));
+        return new AdvertisementRow(sequence, windowsMatch || irkMatch, heading, summary,
+            DescribePayload(advertisement, out watchFields), windowsMatch, args.Timestamp, args.RawSignalStrengthInDBm);
+    }
+
+    internal static AdvertisementRow FromService(long sequence, ulong address, BluetoothAddressType addressType,
+        BluetoothLEAdvertisementType packetType, short rssi, DateTimeOffset seenAt, bool windowsMatch, bool irkMatch,
+        short flags, ReadOnlySpan<byte> apple, out AppleWatchFields watchFields)
+    {
+        string addressText = address == 0 ? "匿名地址" : $"{FormatAddress(address)} · {AddressTypeLabel(addressType, address)}";
+        string signal = rssi is <= -127 or 127 ? "RSSI 无效" : $"RSSI {rssi} dBm";
+        string match = (windowsMatch, irkMatch) switch
+        {
+            (true, true) => "Windows 地址 + IRK 匹配",
+            (true, false) => "Windows 地址匹配",
+            (false, true) => "IRK 匹配",
+            _ => "未匹配"
+        };
+        string summary = $"{seenAt.ToLocalTime():HH:mm:ss.fff} · {signal} · {PacketTypeLabel(packetType)} · {match}";
+        var payload = new List<string>();
+        if (flags >= 0)
+            payload.Add($"标志 {FormatFlags((byte)flags)}");
+        watchFields = default;
+        if (!apple.IsEmpty)
+        {
+            string messages = DescribeAppleMessages(apple, out watchFields);
+            payload.Add($"厂商 Apple (0x004C){messages} · {FormatPreview(apple.ToArray(), apple.Length)}");
+        }
+        return new(sequence, windowsMatch || irkMatch, addressText, summary, string.Join("\n", payload),
+            windowsMatch, seenAt, rssi);
     }
 
     private static string DescribePayload(BluetoothLEAdvertisement advertisement, out AppleWatchFields watchFields)
@@ -232,6 +261,15 @@ internal sealed class AdvertisementHistory
     private readonly Queue<AdvertisementRow> _all = new(Limit);
     private readonly Queue<AdvertisementRow> _matches = new(Limit);
     private readonly object _gate = new();
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _all.Clear();
+            _matches.Clear();
+        }
+    }
 
     public void Add(AdvertisementRow row)
     {

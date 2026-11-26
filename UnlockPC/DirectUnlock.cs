@@ -1,3 +1,4 @@
+﻿using System.Diagnostics.Eventing.Reader;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
@@ -41,7 +42,7 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
         GetLocalAccount(identity);
     }
 
-    public static unsafe DirectUnlock? Prompt(nint window, bool persist = false)
+    public static unsafe DirectUnlock? Prompt(nint window)
     {
         using var identity = WindowsIdentity.GetCurrent();
         var (account, session) = GetLocalAccount(identity);
@@ -49,8 +50,7 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
         var prompt = new CredentialUiInfo
         {
             Size = Marshal.SizeOf<CredentialUiInfo>(), Window = window, Caption = "启用 Apple Watch 自动解锁",
-            Message = persist ? "输入当前 Windows 账户的密码。UnlockPC 会为当前用户加密保存凭据。"
-                : "输入当前 Windows 账户的密码。本次输入仅用于自检。"
+            Message = "输入当前 Windows 账户的密码。本次输入仅用于自检。"
         };
         var username = new StringBuilder(identity.Name, 514);
         byte[] password = new byte[PasswordBytes];
@@ -79,6 +79,55 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
                 CryptographicOperations.ZeroMemory(password);
         }
     }
+
+    public static unsafe DirectUnlock Create(ReadOnlySpan<char> entered)
+    {
+        if (entered.IsEmpty || entered.Length >= PasswordCharacters || entered.Contains('\0'))
+            throw new InvalidOperationException("请输入当前 Windows 账户的密码。");
+
+        using var identity = WindowsIdentity.GetCurrent();
+        var (account, session) = GetLocalAccount(identity);
+        byte[] password = new byte[PasswordBytes];
+        try
+        {
+            entered.CopyTo(MemoryMarshal.Cast<byte, char>(password.AsSpan()));
+            fixed (byte* buffer = password)
+                ValidateAndProtect(account, identity, buffer);
+            return new DirectUnlock(password, session);
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(password);
+            throw;
+        }
+    }
+
+    public void VerifyPassword()
+    {
+        byte[] password = CopyPassword();
+        try { using var verified = Restore(password); }
+        finally { CryptographicOperations.ZeroMemory(password); }
+    }
+
+    internal static bool WindowsReportedAuthenticationFailure(DateTime since)
+    {
+        var query = new EventLogQuery("Application", PathType.LogName,
+            $"*[System[Provider[@Name='UnlockPC Credential Provider'] and EventID=100 and Level=3 and TimeCreated[@SystemTime >= '{since:O}']]]")
+        {
+            ReverseDirection = true
+        };
+        using var reader = new EventLogReader(query);
+        while (reader.ReadEvent() is { } record)
+        {
+            using (record)
+                if (record.Properties.FirstOrDefault()?.Value is string details &&
+                    details.StartsWith("stage=authentication_result ", StringComparison.Ordinal))
+                    return true;
+        }
+        return false;
+    }
+
+    public static bool IsPasswordRejected(Win32Exception error) => error.NativeErrorCode is 86 or 1326 or 1330 or 1907;
 
     public static unsafe DirectUnlock Restore(byte[] savedPassword)
     {

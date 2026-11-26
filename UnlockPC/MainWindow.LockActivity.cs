@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -24,28 +24,46 @@ public sealed partial class MainWindow
     private bool _lockActivityScrollPending;
     private LockActivitySpeech? _lockActivitySpeech;
 
-    private void UpdateWatchSidebarVisibility()
+    private void UpdateRadarDebugPanelVisibility()
     {
-        WatchSidebar.Visibility = RootNavigationView.IsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
-        if (WatchSidebar.Visibility == Visibility.Visible)
+#if UNLOCKPC_DEBUG_PAGE
+        RadarDebugPanel.Visibility = _debugDetailsEnabled && DeviceRadarPage.Visibility == Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (RadarDebugPanel.Visibility == Visibility.Visible)
+        {
+            UpdateRadarDebugPanelSize();
             QueueLockActivityScroll();
+        }
+#endif
     }
 
-    private void UpdateWatchSidebarHeight(double paneHeight) =>
-        WatchSidebar.Height = Math.Clamp(paneHeight - 190, 104, 600);
+    private void UpdateRadarDebugPanelSize()
+    {
+        if (RadarDebugPanel.Visibility != Visibility.Visible || RadarCanvas.ActualWidth <= 0 || RadarCanvas.ActualHeight <= 0)
+            return;
 
-    private void RecordLockActivity(LockActivityEvent activity)
+        double width = RadarCanvas.ActualWidth;
+        RadarDebugPanel.Width = Math.Clamp(width * 0.30, Math.Min(232, width * 0.5), 440);
+        double availableHeight = RadarCanvas.ActualHeight + DeviceRadarPage.Margin.Bottom -
+            RadarDebugPanel.Margin.Top - RadarDebugPanel.Margin.Bottom;
+        RadarDebugPanel.MaxHeight = Math.Clamp(availableHeight, 0, 720);
+        WatchBroadcastCard.MaxHeight = Math.Min(480, RadarDebugPanel.MaxHeight * 0.76);
+    }
+
+    private void RecordLockActivity(LockActivityEvent activity) => DisplayLockActivity(activity, speak: true);
+
+    private void DisplayLockActivity(LockActivityEvent activity, bool speak)
     {
         if (!DispatcherQueue.HasThreadAccess)
         {
-            DispatcherQueue.TryEnqueue(() => RecordLockActivity(activity));
+            DispatcherQueue.TryEnqueue(() => DisplayLockActivity(activity, speak));
             return;
         }
         if (_isClosing)
             return;
 
         string message = activity.Message;
-        string? announcement = _watchRules.SpeakLockActivity ? activity.Speech ?? activity.Message : null;
+        string? announcement = speak && _watchRules.SpeakLockActivity ? activity.Speech ?? activity.Message : null;
         if (activity.Phase == LockActivityPhase.Start)
         {
             _lockActivityStart = _lockActivityPrevious = activity.Tick;
@@ -97,7 +115,7 @@ public sealed partial class MainWindow
         _lockActivityScrollPending = DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             _lockActivityScrollPending = false;
-            if (_isClosing || WatchSidebar.Visibility != Visibility.Visible || LockActivityScroll.XamlRoot is null)
+            if (_isClosing || RadarDebugPanel.Visibility != Visibility.Visible || LockActivityScroll.XamlRoot is null)
                 return;
             WindowRootGrid.UpdateLayout();
             LockActivityScroll.ChangeView(null, LockActivityScroll.ScrollableHeight, null, disableAnimation: true);

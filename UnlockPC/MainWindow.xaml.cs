@@ -35,6 +35,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
     private bool _removingWatch;
     private bool _readingIrk;
     private string? _lastWatchId;
+    private PairedWatch? _selectedWatch;
     private const int ResultLimit = 200;
     private const double NavExpandThreshold = 760;
 
@@ -56,6 +57,9 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
     internal MainWindow(bool showTrayIcon, WatchRuleStore? ruleStore = null)
     {
         InitializeComponent();
+        InitializeInformationPages();
+        if (_radarUiSettings.AnimationsEnabled)
+            RadarMarker.TranslationTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(300) };
         LockActivityItems.ItemsSource = _lockActivity;
         _watchRuleStore = ruleStore ?? WatchRuleStore.ForCurrentUser();
         LoadWatchRules();
@@ -75,7 +79,11 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
             presenter.SetBorderAndTitleBar(true, false);
+            presenter.PreferredMinimumWidth = 800;
+            presenter.PreferredMinimumHeight = 600;
+        }
 
         InstallCaptionButtons(WindowRootGrid, StandardTitleBarHeight);
         void KeepTitleBarClearOfCaptionButtons() => AppTitleBar.Margin = new Thickness(48, 0, CaptionButtonsWidth, 0);
@@ -84,11 +92,8 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
         RootNavigationView.Loaded += (_, _) => FlattenNavContentChrome();
         RootNavigationView.DisplayModeChanged += (_, _) => FlattenNavContentChrome();
-        RootNavigationView.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => UpdateWatchSidebarVisibility());
-        UpdateWatchSidebarVisibility();
         RootNavigationView.SizeChanged += (_, args) =>
         {
-            UpdateWatchSidebarHeight(args.NewSize.Height);
             var mode = args.NewSize.Width >= NavExpandThreshold
                 ? NavigationViewPaneDisplayMode.Left : NavigationViewPaneDisplayMode.LeftCompact;
             if (RootNavigationView.PaneDisplayMode == mode)
@@ -107,10 +112,16 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             Math.Min((int)Math.Round(1040 * scale), display.WorkArea.Width),
             Math.Min((int)Math.Round(740 * scale), display.WorkArea.Height)));
 
-        RootNavigationView.SelectedItem = MonitorItem;
+        RootNavigationView.SelectedItem = showTrayIcon ? DeviceRadarItem : MonitorItem;
         _timer = DispatcherQueue.CreateTimer();
         _timer.Interval = TimeSpan.FromMilliseconds(500);
-        _timer.Tick += (_, _) => RefreshScan();
+        _timer.Tick += async (_, _) =>
+        {
+            if (UsesBackgroundMonitor && _scan is null)
+                await RefreshBackgroundMonitorAsync();
+            else
+                RefreshScan();
+        };
         _unlockedSignalTimer = DispatcherQueue.CreateTimer();
         _unlockedSignalTimer.Interval = TimeSpan.FromMilliseconds(1000);
         _unlockedSignalTimer.Tick += (_, _) =>
@@ -122,20 +133,26 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         {
             _windowPlacement = new MainWindowPlacement(AppWindow);
             _trayIcon = new TrayIcon(this, OpenSettings, Close);
+            StartScanButton.Visibility = StopScanButton.Visibility = Visibility.Collapsed;
         }
         AppWindow.Changed += OnAppWindowChanged;
         Closed += (_, _) =>
         {
             _isClosing = true;
             StopLockActivitySpeech();
-            _windowPlacement?.Save();
+            if (!_skipWindowPlacementSave)
+                _windowPlacement?.Save();
             StopWatchConnectionStatus();
             AppWindow.Changed -= OnAppWindowChanged;
             _trayIcon?.Dispose();
-            _pairing?.Cancel();
+            _watchBinding?.Cancel();
             EndScan();
         };
         ShowSnapshot(null);
+#if UNLOCKPC_DEBUG_PAGE
+        if (showTrayIcon && File.Exists(AppDataPaths.DebugPageUnlocked))
+            ShowDebugPage(selectPage: false);
+#endif
     }
 
     internal void RestoreWindowPlacement() => _windowPlacement?.Restore();
@@ -237,25 +254,44 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
     private void RootNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        bool radar = ReferenceEquals(args.SelectedItem, DeviceRadarItem);
+        bool management = ReferenceEquals(args.SelectedItem, WatchManagementItem);
+        bool monitor = ReferenceEquals(args.SelectedItem, MonitorItem);
         bool trials = ReferenceEquals(args.SelectedItem, TrialsItem);
         bool advanced = ReferenceEquals(args.SelectedItem, AdvancedItem);
-        PageTitleText.Text = advanced ? "高级选项" : trials ? "漏检测量" : "Apple Watch 在场检测";
+        bool diagnostics = ReferenceEquals(args.SelectedItem, DiagnosticsItem);
+        bool about = ReferenceEquals(args.SelectedItem, AboutItem);
+#if UNLOCKPC_DEBUG_PAGE
+        var debugVisibility = _debugItem is not null && ReferenceEquals(args.SelectedItem, _debugItem)
+            ? Visibility.Visible : Visibility.Collapsed;
+        _debugLockButton.Visibility = debugVisibility;
+        if (_debugPage is not null)
+            _debugPage.Visibility = debugVisibility;
+#endif
+        PageTitleText.Text = args.SelectedItem is NavigationViewItem { Content: string title }
+            ? monitor ? "Apple Watch 在场检测" : title : string.Empty;
+        PageDescriptionText.Visibility = monitor || trials || advanced ? Visibility.Visible : Visibility.Collapsed;
         PageDescriptionText.Text = advanced ? "自动锁定和解锁的设置会在修改后自动保存。" : trials
             ? "按手表状态比较已知在场时的广播漏检率。"
             : "通过蓝牙广播匹配指定手表，查看最后见到时间和信号强度。";
+        DeviceRadarPage.Visibility = radar ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRadarDebugPanelVisibility();
         TrialsPage.Visibility = trials ? Visibility.Visible : Visibility.Collapsed;
         AdvancedPage.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
-        MonitorPage.Visibility = trials || advanced ? Visibility.Collapsed : Visibility.Visible;
+        WatchManagementPage.Visibility = management ? Visibility.Visible : Visibility.Collapsed;
+        MonitorPage.Visibility = monitor ? Visibility.Visible : Visibility.Collapsed;
+        DiagnosticsPage.Visibility = diagnostics ? Visibility.Visible : Visibility.Collapsed;
+        AboutPage.Visibility = about ? Visibility.Visible : Visibility.Collapsed;
+        UpdateRadarPulse(_scan is not null || _monitorScanning);
         ContentScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
     }
 
     internal async Task LoadPairedWatchesAsync(PairedWatch? newlyPaired = null, bool autoStart = true)
     {
         int version = ++_deviceLoadVersion;
-        var previous = PairedWatchBox.SelectedItem as PairedWatch;
-        RefreshWatchesButton.IsEnabled = false;
+        var previous = _selectedWatch;
         ReadSavedUnlock()?.Dispose();
-        UpdateDirectUnlockControls(matched: false);
+        UpdateDirectUnlockControls();
         try
         {
             PairedWatch[] watches = await PairedWatch.ListAsync();
@@ -271,21 +307,26 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
                 _ = ForgetIfUnpairedAsync(missingId);
 
             var appleWatches = watches.Where(watch => watch.HasWatchName).ToArray();
-            var preferred = newlyPaired ?? previous ?? savedWatch;
-            var selected = preferred is null
-                ? appleWatches.Length == 1 ? appleWatches[0] : null
-                : watches.FirstOrDefault(watch => IsSameId(watch.Id, preferred.Id));
-            PairedWatchBox.ItemsSource = watches;
-            PairedWatchBox.SelectedItem = selected;
+            var preferred = newlyPaired ?? previous;
+            var selected = _hasSavedUnlock ? savedWatch
+                : watches.FirstOrDefault(watch => preferred is not null && IsSameId(watch.Id, preferred.Id))
+                    ?? (appleWatches.Length == 1 ? appleWatches[0] : null);
+            if (_scan is not null && (_lastWatchId is null || selected is null || !IsSameId(_lastWatchId, selected.Id)))
+                EndScan();
+            SetSelectedWatch(selected);
             if (selected is null)
-                ConnectionStatusText.Text = watches.Length == 0 ? "Windows 中没有已配对的 BLE 设备。" : "请选择你要检测的 Apple Watch。";
+                ConnectionStatusText.Text = _hasSavedUnlock ? "当前未找到已绑定的 Windows 蓝牙设备。"
+                    : appleWatches.Length > 1 ? "检测到多块已配对手表，请在绑定向导中选择。"
+                    : "尚未选择 Windows 蓝牙设备。";
 
-            if (autoStart && selected is not null)
+            if (UsesBackgroundMonitor)
             {
-                if (_pairing is null && newlyPaired is null)
-                    PairingStatus.Text = $"Windows 已有配对记录：{selected.Name}。";
-                StartScan(selected);
+                StartScanButton.IsEnabled = StopScanButton.IsEnabled = false;
+                _timer.Start();
+                await RefreshBackgroundMonitorAsync();
             }
+            else if (autoStart && selected is not null && (_trayIcon is null || _watchBinding is not null))
+                StartScan(selected);
         }
         catch (Exception ex)
         {
@@ -293,48 +334,44 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             {
                 if (newlyPaired is not null)
                 {
-                    PairedWatchBox.ItemsSource = new[] { newlyPaired };
-                    PairedWatchBox.SelectedItem = newlyPaired;
+                    SetSelectedWatch(newlyPaired);
                     StartScan(newlyPaired);
                 }
                 else
                 {
                     ConnectionStatusText.Text = "无法读取 Windows 已配对设备。";
-                    ShowScanError($"读取已配对设备失败（0x{ex.HResult:X8}）。");
+                    ShowWatchManagementStatus($"读取已配对设备失败（0x{ex.HResult:X8}）。", InfoBarSeverity.Error);
                 }
             }
         }
         finally
         {
             if (!_isClosing && version == _deviceLoadVersion)
-                RefreshWatchesButton.IsEnabled = _scan is null;
+                UpdateWatchManagement();
         }
     }
 
     private static bool IsSameId(string first, string second) =>
         string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
 
-    private async void RefreshWatches_Click(object sender, RoutedEventArgs args) =>
-        await LoadPairedWatchesAsync(autoStart: false);
-
-    private void UpdateRemoveWatchButton() =>
-        RemoveWatchButton.IsEnabled = !_removingWatch && _pairing is null && PairedWatchBox.SelectedItem is PairedWatch;
 
     private async void RemoveWatch_Click(object sender, RoutedEventArgs args)
     {
-        if (_isClosing || _removingWatch || _pairing is not null || PairedWatchBox.SelectedItem is not PairedWatch watch)
+        if (_isClosing || _removingWatch || _watchBinding is not null || _promptingForDirectUnlock || _readingIrk ||
+            _selectedWatch is null && !_hasSavedUnlock)
             return;
 
+        string? id = _selectedWatch?.Id ?? _savedUnlockDeviceId;
+        string name = _selectedWatch?.Name ?? "已绑定手表";
         _removingWatch = true;
-        UpdateRemoveWatchButton();
-        PairButton.IsEnabled = false;
+        UpdateWatchManagement();
         try
         {
             var dialog = new ContentDialog
             {
                 XamlRoot = RemoveWatchButton.XamlRoot,
-                Title = "移除设备？",
-                Content = $"Windows 将解除与「{watch.Name}」的蓝牙配对。",
+                Title = "移除手表？",
+                Content = $"将解除 Windows 与「{name}」的蓝牙配对，并清除 UnlockPC 中保存的手表密钥和解锁凭据。",
                 PrimaryButtonText = "移除",
                 CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Close
@@ -342,72 +379,71 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             if (await dialog.ShowAsync() != ContentDialogResult.Primary || _isClosing)
                 return;
 
-            ScanError.IsOpen = false;
-            var device = await DeviceInformation.CreateFromIdAsync(watch.Id, PairedWatch.Properties,
-                DeviceInformationKind.AssociationEndpoint).AsTask().WaitAsync(TimeSpan.FromSeconds(8));
-            if (_isClosing)
-                return;
-
-            if (device?.Pairing.IsPaired == true)
+            if (id is not null)
             {
-                var result = await device.Pairing.UnpairAsync();
+                var device = await DeviceInformation.CreateFromIdAsync(id, PairedWatch.Properties,
+                    DeviceInformationKind.AssociationEndpoint).AsTask().WaitAsync(TimeSpan.FromSeconds(8));
                 if (_isClosing)
                     return;
-                if (result.Status is not (DeviceUnpairingResultStatus.Unpaired or DeviceUnpairingResultStatus.AlreadyUnpaired))
+                if (device?.Pairing.IsPaired == true)
                 {
-                    ShowScanError($"Windows 未能移除「{watch.Name}」（{result.Status}）。");
-                    return;
+                    var result = await device.Pairing.UnpairAsync();
+                    if (_isClosing)
+                        return;
+                    if (result.Status is not (DeviceUnpairingResultStatus.Unpaired or DeviceUnpairingResultStatus.AlreadyUnpaired))
+                    {
+                        ShowWatchManagementStatus($"Windows 未能移除「{name}」（{result.Status}）。", InfoBarSeverity.Error);
+                        return;
+                    }
                 }
             }
 
-            if (PairedWatchBox.SelectedItem is PairedWatch selected && IsSameId(selected.Id, watch.Id))
-            {
-                if (_scan is not null)
-                    EndScan();
-                PairedWatchBox.SelectedItem = null;
-            }
-            ForgetSavedUnlockForDevice(watch.Id);
-            if (PairedWatchBox.ItemsSource is IEnumerable<PairedWatch> watches)
-                PairedWatchBox.ItemsSource = watches.Where(item => !IsSameId(item.Id, watch.Id)).ToArray();
-
-            PairingStatus.Text = $"Windows 已移除「{watch.Name}」的配对。需要重新连接时，请点击「开始配对」。";
+            if (_scan is not null)
+                EndScan();
+            _pendingWatchBinding = null;
+            if (_hasSavedUnlock)
+                ForgetSavedUnlock();
+            ResetBackgroundDisplay();
+            SetSelectedWatch(null);
             await LoadPairedWatchesAsync(autoStart: false);
+            if (!_isClosing)
+                ShowWatchManagementStatus(_hasSavedUnlock ? "Windows 配对已解除，本地授权清除失败，请重试。" : "已移除手表。",
+                    _hasSavedUnlock ? InfoBarSeverity.Error : InfoBarSeverity.Success);
         }
         catch (Exception ex)
         {
             if (!_isClosing)
-                ShowScanError($"无法移除「{watch.Name}」（0x{ex.HResult:X8}）。");
+                ShowWatchManagementStatus($"无法移除「{name}」（0x{ex.HResult:X8}）。", InfoBarSeverity.Error);
         }
         finally
         {
             _removingWatch = false;
             if (!_isClosing)
-            {
-                PairButton.IsEnabled = true;
-                UpdateRemoveWatchButton();
-            }
+                UpdateWatchManagement();
         }
     }
 
-    private void PairedWatchBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    private void SetSelectedWatch(PairedWatch? watch)
     {
-        var watch = PairedWatchBox.SelectedItem as PairedWatch;
-        UpdateWatchConnectionStatus();
-        StartScanButton.IsEnabled = _scan is null && watch is not null;
-        UpdateRemoveWatchButton();
+        bool changed = _selectedWatch?.Id != watch?.Id;
+        _selectedWatch = watch;
+        if (changed)
+            UpdateWatchConnectionStatus();
+        StartScanButton.IsEnabled = _scan is null && watch is not null && !UsesBackgroundMonitor;
+        UpdateWatchManagement();
         if (_scan is null)
             ShowConnection(watch?.IsConnected);
     }
 
     private void StartScan_Click(object sender, RoutedEventArgs args)
     {
-        if (PairedWatchBox.SelectedItem is PairedWatch watch)
+        if (_selectedWatch is PairedWatch watch)
             StartScan(watch);
     }
 
     private void StartScan(PairedWatch watch)
     {
-        if (_scan is not null || _isClosing || _removingWatch)
+        if (_scan is not null || _isClosing || _removingWatch || UsesBackgroundMonitor)
             return;
 
         try
@@ -424,11 +460,11 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             ScanError.IsOpen = false;
             _scan = new PresenceScan(watch);
             _scan.Start();
-            RestoreDirectUnlock(watch, _scan);
+            _ = RestoreDirectUnlockAsync(watch, _scan);
             UpdateWindowsHelloWake();
             _advertisementHistory = _scan.Advertisements;
             _advertisementRows.Clear();
-            StartScanButton.IsEnabled = PairedWatchBox.IsEnabled = RefreshWatchesButton.IsEnabled = false;
+            StartScanButton.IsEnabled = false;
             StopScanButton.IsEnabled = true;
             _lastPoll = Stopwatch.GetTimestamp();
             ShowTrialIdle("请选择手表状态并开始测量。");
@@ -446,47 +482,36 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
     private async void StartIrk_Click(object sender, RoutedEventArgs args)
     {
-        if (_readingIrk || _scan is not { } scan || PairedWatchBox.SelectedItem is not PairedWatch watch)
+        if (_readingIrk || _watchBinding is not null || _scan is not { } scan || _selectedWatch is not PairedWatch watch)
             return;
 
-        if (RestoreDirectUnlock(watch, scan))
+        if (_savedUnlockDeviceId is not { } id || !IsSameId(id, watch.Id))
         {
-            RefreshScan();
+            IrkError.Message = "请先在「手表管理」绑定这块手表。";
+            IrkError.IsOpen = true;
             return;
         }
 
         _readingIrk = true;
+        UpdateWatchManagement();
         IrkError.IsOpen = false;
         RefreshScan();
-        byte[]? key = null;
         try
         {
-            var result = await BondedIrk.ReadAsync(watch.Address);
-            key = result.Key;
-            if (_isClosing || _scan != scan)
-                return;
-
-            if (key is null || !scan.StartIrkObservation(key))
+            if (!await RestoreDirectUnlockAsync(watch, scan) && !_isClosing && ReferenceEquals(_scan, scan))
             {
-                IrkError.Message = result.Error ?? "蓝牙扫描已停止。请重新开始检测。";
-                IrkError.IsOpen = true;
-            }
-        }
-        catch (Exception ex)
-        {
-            if (!_isClosing && _scan == scan)
-            {
-                IrkError.Message = $"无法读取 Windows 配对密钥（0x{ex.HResult:X8}）。";
+                IrkError.Message = _directUnlockError ?? "蓝牙扫描已停止。请重新开始检测。";
                 IrkError.IsOpen = true;
             }
         }
         finally
         {
-            if (key is not null)
-                CryptographicOperations.ZeroMemory(key);
             _readingIrk = false;
             if (!_isClosing)
+            {
+                UpdateWatchManagement();
                 RefreshScan();
+            }
         }
     }
 
@@ -501,6 +526,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
     private void EndScan(ScanSnapshot? snapshot = null)
     {
         _timer.Stop();
+        ResetWatchOfflineReminder();
         StopDirectUnlock();
         var scan = _scan;
         _scan = null;
@@ -527,8 +553,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
         string message = _trial is null ? "请先在「在场检测」开启检测。" : "扫描已停止，本轮未计入结果。";
         ShowTrialIdle(message, canStart: false);
-        PairedWatchBox.IsEnabled = RefreshWatchesButton.IsEnabled = true;
-        StartScanButton.IsEnabled = PairedWatchBox.SelectedItem is PairedWatch;
+        StartScanButton.IsEnabled = _selectedWatch is PairedWatch;
         StopScanButton.IsEnabled = false;
         IrkError.IsOpen = false;
         ShowSnapshot(snapshot, scanning: false);
@@ -548,8 +573,8 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
                 EndScan(snapshot);
                 if (_lastWatchId is { } removedId)
                     _ = ForgetIfUnpairedAsync(removedId);
-                PairedWatchBox.SelectedItem = null;
-                ShowScanError("Windows 已移除这个配对设备。请刷新设备或重新配对。");
+                SetSelectedWatch(null);
+                ShowScanError("Windows 已移除这个配对设备。请在「手表管理」重新绑定。");
                 return;
             }
 
@@ -585,6 +610,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
             long now = Stopwatch.GetTimestamp();
             var pollGap = Stopwatch.GetElapsedTime(_lastPoll, now);
             _lastPoll = now;
+            UpdateWatchOfflineReminder(snapshot, now, interrupted: pollGap > TimeSpan.FromSeconds(3));
             if (_watchWake is { } watchWake)
                 WatchWakeStatus.Text = watchWake.Update(now, snapshot.LastNear, pollGap > TimeSpan.FromSeconds(3));
             RefreshDirectUnlock(scan, snapshot);
@@ -620,44 +646,6 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
         {
             EndScan();
             ShowScanError($"蓝牙扫描中断（0x{ex.HResult:X8}）。");
-        }
-    }
-
-    private async void OpenSignInOptions_Click(object sender, RoutedEventArgs args)
-    {
-        var link = (HyperlinkButton)sender;
-        link.IsEnabled = false;
-        SignInOptionsError.IsOpen = false;
-        const string signInOptions = "ms-settings:signinoptions";
-        try
-        {
-            if (await Windows.System.Launcher.LaunchUriAsync(new Uri(signInOptions)))
-            {
-                BluetoothLog.Write("signin_options_opened", new { method = "launcher" });
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            BluetoothLog.Write("signin_options_launcher_failed", new { ex.HResult });
-        }
-        finally
-        {
-            link.IsEnabled = true;
-        }
-
-        if (_isClosing)
-            return;
-
-        try
-        {
-            using var settings = Process.Start(new ProcessStartInfo(signInOptions) { UseShellExecute = true });
-            BluetoothLog.Write("signin_options_opened", new { method = "shell" });
-        }
-        catch (Exception ex)
-        {
-            BluetoothLog.Write("signin_options_shell_failed", new { ex.HResult });
-            SignInOptionsError.IsOpen = true;
         }
     }
 
@@ -750,6 +738,7 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
     private void ShowSnapshot(ScanSnapshot? snapshot, bool scanning = false)
     {
+        UpdateDeviceRadar(snapshot, scanning);
         ShowWatchBroadcast(scanning ? snapshot?.WatchBroadcast ?? default : default, DateTimeOffset.UtcNow, scanning);
 
         if (!scanning)
@@ -765,11 +754,13 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
         LastSeenText.Text = snapshot?.LastMatch is { } last
             ? $"最后见到  {last.SeenAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}" : "最后见到  —";
+#if UNLOCKPC_DEBUG_PAGE
         RssiText.Text = snapshot?.LastMatch is { } sample ? $"RSSI  {sample.Rssi} dBm" : "RSSI  —";
+#endif
         PacketCountText.Text = $"匹配 {snapshot?.Matched ?? 0:N0} 条 · 共收到 {snapshot?.Total ?? 0:N0} 条 BLE 广播";
 
         var irk = scanning ? snapshot?.Irk : null;
-        StartIrkButton.IsEnabled = scanning && irk is null && !_readingIrk;
+        StartIrkButton.IsEnabled = scanning && irk is null && _hasSavedUnlock && !_readingIrk;
         StopIrkButton.IsEnabled = irk is not null;
         if (irk is { } observation)
         {
@@ -793,8 +784,13 @@ public sealed partial class MainWindow : WinUIKit.ThemedWindow
 
     private void StartTrial_Click(object sender, RoutedEventArgs args)
     {
-        if (ScenarioBox.SelectedItem is not ComboBoxItem ||
-            _scan?.StartTrial((WatchScenario)ScenarioBox.SelectedIndex) is not { } trial)
+        if (ScenarioBox.SelectedItem is not ComboBoxItem)
+            return;
+        var scenario = (WatchScenario)ScenarioBox.SelectedIndex;
+        var trial = UsesBackgroundMonitor && _monitorScanning
+            ? new ObservationTrial(scenario, DateTimeOffset.UtcNow, Stopwatch.GetTimestamp())
+            : _scan?.StartTrial(scenario);
+        if (trial is null)
             return;
 
         _trial = trial;

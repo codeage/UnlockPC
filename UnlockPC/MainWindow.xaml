@@ -51,113 +51,119 @@ OpenPaneLength="224"
 CompactPaneLength="48"
 SelectionChanged="RootNavigationView_SelectionChanged">
 <NavigationView.MenuItems>
+<NavigationViewItem x:Name="DeviceRadarItem" Content="设备检测">
+    <NavigationViewItem.Icon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE7F4;" /></NavigationViewItem.Icon>
+</NavigationViewItem>
+<NavigationViewItem x:Name="WatchManagementItem" Content="手表管理">
+    <NavigationViewItem.Icon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE916;" /></NavigationViewItem.Icon>
+</NavigationViewItem>
 <NavigationViewItem x:Name="MonitorItem" Content="在场检测" Icon="Find" />
 <NavigationViewItem x:Name="TrialsItem" Content="漏检测量">
 <NavigationViewItem.Icon><FontIcon Glyph="&#xE9D9;" /></NavigationViewItem.Icon>
 </NavigationViewItem>
 <NavigationViewItem x:Name="AdvancedItem" Content="高级选项" Icon="Setting" />
+<NavigationViewItem x:Name="DiagnosticsItem" Content="诊断">
+    <NavigationViewItem.Icon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE90F;" /></NavigationViewItem.Icon>
+</NavigationViewItem>
+<NavigationViewItem x:Name="AboutItem" Content="关于">
+    <NavigationViewItem.Icon><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE946;" /></NavigationViewItem.Icon>
+</NavigationViewItem>
 </NavigationView.MenuItems>
 
-<NavigationView.PaneFooter>
-    <Grid x:Name="WatchSidebar" Margin="12,0,12,12" Height="440" RowSpacing="8">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <Border x:Name="WatchBroadcastCard" Padding="12" CornerRadius="8"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Border.Resources>
-                <Style x:Key="WatchFieldLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
-                    <Setter Property="TextWrapping" Value="Wrap" />
-                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-                </Style>
-                <Style x:Key="WatchFieldValue" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
-                    <Setter Property="TextWrapping" Value="Wrap" />
-                </Style>
-            </Border.Resources>
-            <Grid RowSpacing="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock Text="手表当前状态" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <ScrollViewer x:Name="WatchBroadcastScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
-                              AutomationProperties.Name="手表广播状态位">
-                    <StackPanel Spacing="8">
-                        <TextBlock x:Name="WatchBroadcastStoppedText" Text="检测已停止" Style="{StaticResource WatchFieldLabel}" Visibility="Collapsed" />
-                        <Grid x:Name="WatchBroadcastSummary" ColumnSpacing="12" RowSpacing="4">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                            <TextBlock Text="佩戴" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchWristValue" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                            <TextBlock Grid.Row="1" Text="锁定" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchLockValue" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                            <TextBlock Grid.Row="2" Text="屏幕" Style="{StaticResource WatchFieldLabel}" />
-                            <TextBlock x:Name="WatchScreenValue" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                        </Grid>
-                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Nearby Info  0x10" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <TextBlock x:Name="WatchNearbySourceText" Style="{StaticResource WatchFieldLabel}" />
-                            <StackPanel x:Name="WatchNearbyDetails" Spacing="6">
-                                <TextBlock x:Name="WatchNearbyInfoText" Style="{StaticResource WatchFieldValue}" />
-                                <Grid ColumnSpacing="8" RowSpacing="4">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                    <TextBlock Text="锁定线索" Style="{StaticResource WatchFieldLabel}" />
-                                    <TextBlock x:Name="WatchLockFlagText" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                                    <TextBlock Grid.Row="1" Text="解锁线索" Style="{StaticResource WatchFieldLabel}" />
-                                    <TextBlock x:Name="WatchAutoUnlockFlagText" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                                    <TextBlock Grid.Row="2" Text="手表自动解锁" Style="{StaticResource WatchFieldLabel}" />
-                                    <TextBlock x:Name="WatchWatchUnlockFlagText" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                                    <TextBlock Grid.Row="3" Text="认证标签" Style="{StaticResource WatchFieldLabel}" />
-                                    <TextBlock x:Name="WatchAuthTagText" Grid.Row="3" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
-                                </Grid>
-                                <TextBlock x:Name="WatchOtherFlagsText" Style="{StaticResource WatchFieldLabel}" />
-                            </StackPanel>
-                        </StackPanel>
-                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
-                        <StackPanel Spacing="4">
-                            <TextBlock Text="Magic Switch  0x0B" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <TextBlock x:Name="WatchMagicSwitchText" Style="{StaticResource WatchFieldValue}" />
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
+
+<Grid>
+<Grid x:Name="DeviceRadarPage" Margin="16,0,16,16" Visibility="Collapsed">
+    <Grid.Resources>
+        <LinearGradientBrush x:Key="RadarDeviceScreenBrush" StartPoint="0,1" EndPoint="1,0">
+            <GradientStop Offset="0" Color="{ThemeResource SystemAccentColor}" />
+            <GradientStop Offset="1" Color="{ThemeResource SystemAccentColorLight2}" />
+        </LinearGradientBrush>
+    </Grid.Resources>
+    <Canvas x:Name="RadarCanvas" SizeChanged="RadarCanvas_SizeChanged" IsHitTestVisible="False">
+        <Viewbox x:Name="RadarDial">
+            <Viewbox.Clip><RectangleGeometry x:Name="RadarDialClip" /></Viewbox.Clip>
+            <Grid Width="320" Height="320">
+                <Ellipse Opacity="0.06">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Offset="0" Color="{ThemeResource SystemAccentColor}" />
+                            <GradientStop Offset="1" Color="Transparent" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <!-- Align the fade bands in dial coordinates so the arcs disappear at the lower edge. -->
+                <Ellipse Width="302" Height="302" StrokeThickness="0.48" Opacity="0.13">
+                    <Ellipse.Stroke>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0.56" Color="{ThemeResource SystemAccentColor}" />
+                            <GradientStop Offset="0.72" Color="Transparent" />
+                        </LinearGradientBrush>
+                    </Ellipse.Stroke>
+                </Ellipse>
+                <Ellipse Width="220" Height="220" StrokeThickness="0.52" Opacity="0.17">
+                    <Ellipse.Stroke>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0.59" Color="{ThemeResource SystemAccentColor}" />
+                            <GradientStop Offset="0.80" Color="Transparent" />
+                        </LinearGradientBrush>
+                    </Ellipse.Stroke>
+                </Ellipse>
+                <Ellipse Width="122" Height="122" StrokeThickness="0.56" Opacity="0.21">
+                    <Ellipse.Stroke>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Offset="0.66" Color="{ThemeResource SystemAccentColor}" />
+                            <GradientStop Offset="1" Color="Transparent" />
+                        </LinearGradientBrush>
+                    </Ellipse.Stroke>
+                </Ellipse>
+                <Ellipse x:Name="RadarPulse" RenderTransformOrigin="0.5,0.5" Opacity="0" Visibility="Collapsed">
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform x:Name="RadarPulseScale" />
+                    </Ellipse.RenderTransform>
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Offset="0.54" Color="Transparent" />
+                            <GradientStop Offset="0.77" Color="{ThemeResource SystemAccentColor}" />
+                            <GradientStop Offset="1" Color="Transparent" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
             </Grid>
-        </Border>
-        <Border x:Name="LockActivityFooter" Grid.Row="1" Padding="12" CornerRadius="8"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Grid RowSpacing="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock Text="锁定与解锁记录" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="LockActivityEmptyText" Grid.Row="1" Text="暂无记录" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" />
-                <ScrollViewer x:Name="LockActivityScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
-                              AutomationProperties.Name="锁定与解锁过程记录">
-                    <ItemsControl x:Name="LockActivityItems">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="local:LockActivityEntry">
-                                <StackPanel Margin="0,0,6,10" Spacing="2">
-                                    <TextBlock Text="{x:Bind Timestamp}" Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap"
-                                               Style="{StaticResource CaptionTextBlockStyle}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </Grid>
-        </Border>
-    </Grid>
-</NavigationView.PaneFooter>
+        </Viewbox>
+        <!-- Microsoft Fluent System Icons, Desktop 32 Filled (MIT). -->
+        <Viewbox x:Name="RadarComputer" Width="48" Height="48">
+            <Canvas Width="32" Height="32">
+                <Path Fill="{ThemeResource TextFillColorPrimaryBrush}" Data="F1 M2 6.25C2 4.45507 3.45507 3 5.25 3H26.75C28.5449 3 30 4.45507 30 6.25V21.75C30 23.5449 28.5449 25 26.75 25H20.0059V27.0012L23.0042 27.0012C23.5565 27.0012 24.0042 27.4486 24.0042 28.0005C24.0042 28.5525 23.5565 28.9999 23.0043 28.9999L9.01197 29C8.45969 29 8.01197 28.5526 8.01196 28.0007C8.01196 27.4488 8.45967 27.0013 9.01196 27.0013L12.01 27.0013V25H5.25C3.45507 25 2 23.5449 2 21.75V6.25ZM14.01 25V27.0013L18.0059 27.0013V25H14.01Z" />
+                <Rectangle Canvas.Left="4.5" Canvas.Top="5.5" Width="23" Height="17" RadiusX="1.4" RadiusY="1.4"
+                           Fill="{StaticResource RadarDeviceScreenBrush}" />
+            </Canvas>
+        </Viewbox>
+        <Canvas x:Name="RadarMarker" Width="1" Height="1" Visibility="Collapsed">
+            <Border Canvas.Left="-19" Canvas.Top="-19" Width="38" Height="38" CornerRadius="19"
+                    Background="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <!-- Microsoft Fluent System Icons, Smartwatch 24 Filled (MIT). -->
+                <Viewbox Width="29" Height="29" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Canvas Width="24" Height="24">
+                        <Path Fill="{ThemeResource TextFillColorPrimaryBrush}" Data="F1 M9.5 2C8.39543 2 7.5 2.89543 7.5 4V5.29076C7.96322 5.10325 8.46955 5 9 5H15C15.5304 5 16.0368 5.10325 16.5 5.29076V4C16.5 2.89543 15.6046 2 14.5 2H9.5ZM9 6C7.34315 6 6 7.34315 6 9V15C6 16.6569 7.34315 18 9 18H15C16.6569 18 18 16.6569 18 15V13C18.5523 13 19 12.5523 19 12V11C19 10.4477 18.5523 10 18 10V9C18 7.34315 16.6569 6 15 6H9ZM9 19C8.46955 19 7.96322 18.8967 7.5 18.7092V20C7.5 21.1046 8.39543 22 9.5 22H14.5C15.6046 22 16.5 21.1046 16.5 20V18.7092C16.0368 18.8967 15.5305 19 15 19H9Z" />
+                        <Rectangle Canvas.Left="7.5" Canvas.Top="7.5" Width="9" Height="9" RadiusX="1.9" RadiusY="1.9"
+                                   Fill="{StaticResource RadarDeviceScreenBrush}" />
+                        <Path Data="M 12,9.5 L 12,12 L 13.7,13.1" Stroke="{ThemeResource TextFillColorPrimaryBrush}"
+                              StrokeThickness="1" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round" />
+                    </Canvas>
+                </Viewbox>
+            </Border>
+            <StackPanel x:Name="RadarDeviceLabel" Canvas.Top="25" Spacing="2">
+                <TextBlock x:Name="RadarDeviceName" Style="{StaticResource BodyStrongTextBlockStyle}"
+                           TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="RadarDeviceSignal" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextAlignment="Center"
+                           TextWrapping="Wrap" MaxLines="2" />
+            </StackPanel>
+        </Canvas>
+    </Canvas>
+</Grid>
 
 <ScrollViewer x:Name="ContentScrollViewer"
 Margin="0,48,0,0"
@@ -173,70 +179,209 @@ SizeChanged="ContentScrollViewer_SizeChanged">
 </Grid.RowDefinitions>
 
 <StackPanel Spacing="8">
-    <TextBlock x:Name="PageTitleText" Style="{StaticResource TitleTextBlockStyle}" />
+    <Grid x:Name="PageTitleRow" ColumnSpacing="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="PageTitleText" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
+    </Grid>
     <TextBlock x:Name="PageDescriptionText" Style="{StaticResource BodyTextBlockStyle}"
                Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
 </StackPanel>
 
+<StackPanel x:Name="WatchManagementPage" Grid.Row="1" Spacing="6" Visibility="Collapsed">
+    <StackPanel.Resources>
+        <Style x:Key="WatchSettingCardStyle" TargetType="Border" BasedOn="{StaticResource SettingsCardStyle}">
+            <Setter Property="Padding" Value="18,12" />
+            <Setter Property="MinHeight" Value="64" />
+        </Style>
+        <Style x:Key="WatchSettingRowStyle" TargetType="Grid">
+            <Setter Property="ColumnSpacing" Value="16" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="WatchSettingLabelsStyle" TargetType="StackPanel">
+            <Setter Property="Spacing" Value="2" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="WatchSettingDetailStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="WatchSettingSwitchStyle" TargetType="ToggleSwitch">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Width" Value="56" />
+            <Setter Property="OnContent" Value="" />
+            <Setter Property="OffContent" Value="" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style x:Key="UnlockSettingRowStyle" TargetType="Border">
+            <Setter Property="Padding" Value="18,12" />
+            <Setter Property="MinHeight" Value="52" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="0,1,0,0" />
+        </Style>
+        <!-- Microsoft Fluent System Icons, Question Circle 16 Regular (MIT). -->
+        <DataTemplate x:Key="WatchSettingHelpIcon">
+            <Path Width="16" Height="16" Stretch="Uniform"
+                  Fill="{ThemeResource TextFillColorSecondaryBrush}" Data="F1 M8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8C1 4.13401 4.13401 1 8 1ZM8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2ZM8 10.5C8.41421 10.5 8.75 10.8358 8.75 11.25C8.75 11.6642 8.41421 12 8 12C7.58579 12 7.25 11.6642 7.25 11.25C7.25 10.8358 7.58579 10.5 8 10.5ZM8 4C9.10457 4 10 4.89543 10 6C10 6.45796 9.87522 6.8032 9.6748 7.08887C9.49738 7.34169 9.24942 7.55239 9.09668 7.69922C8.92663 7.86268 8.78826 8.01726 8.68555 8.2334C8.58291 8.44944 8.5 8.7612 8.5 9.25C8.5 9.52614 8.27614 9.75 8 9.75C7.72386 9.75 7.5 9.52614 7.5 9.25C7.5 8.64401 7.60468 8.18045 7.7832 7.80469C7.96165 7.42917 8.19844 7.17548 8.40332 6.97852C8.62547 6.76497 8.75265 6.66255 8.85645 6.51465C8.93728 6.39943 9 6.25513 9 6C9 5.44772 8.55228 5 8 5C7.44772 5 7 5.44772 7 6C7 6.27614 6.77614 6.5 6.5 6.5C6.22386 6.5 6 6.27614 6 6C6 4.89543 6.89543 4 8 4Z" />
+        </DataTemplate>
+        <Style x:Key="WatchSettingHelpStyle" TargetType="Button">
+            <Setter Property="Content" Value="?" />
+            <Setter Property="ContentTemplate" Value="{StaticResource WatchSettingHelpIcon}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="3" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Style>
+    </StackPanel.Resources>
+
+    <InfoBar x:Name="WatchManagementStatus" IsClosable="True" />
+    <TextBlock Text="设备" Style="{StaticResource BodyStrongTextBlockStyle}" AutomationProperties.HeadingLevel="Level2" />
+    <Border Style="{StaticResource WatchSettingCardStyle}">
+        <Grid Style="{StaticResource WatchSettingRowStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE916;" FontSize="20" />
+            <StackPanel Grid.Column="1" Style="{StaticResource WatchSettingLabelsStyle}">
+                <TextBlock x:Name="ManagedWatchName" Text="尚未绑定手表"
+                           Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                <TextBlock x:Name="ConnectionStatusText" Text="正在查找已配对手表…"
+                           Style="{StaticResource WatchSettingDetailStyle}" />
+                <TextBlock x:Name="DirectUnlockStatus" Style="{StaticResource WatchSettingDetailStyle}" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="PairButton" Content="绑定手表…" Click="StartPairing_Click"
+                        Style="{StaticResource AccentButtonStyle}" />
+                <Button x:Name="RemoveWatchButton" Content="移除…" Click="RemoveWatch_Click"
+                        AutomationProperties.Name="移除手表" IsEnabled="False" />
+            </StackPanel>
+        </Grid>
+    </Border>
+
+    <InfoBar x:Name="WatchManagementRulesStatus" IsClosable="True" />
+    <TextBlock Text="自动解锁" Style="{StaticResource BodyStrongTextBlockStyle}"
+               Margin="0,16,0,0" AutomationProperties.HeadingLevel="Level2" />
+    <Border Style="{StaticResource WatchSettingCardStyle}" Padding="0">
+        <StackPanel>
+            <Border Style="{StaticResource UnlockSettingRowStyle}" BorderThickness="0">
+                <Grid Style="{StaticResource WatchSettingRowStyle}">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="自动解锁" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <ToggleSwitch x:Name="AutoUnlockSwitch" Grid.Column="1" Style="{StaticResource WatchSettingSwitchStyle}"
+                                  AutomationProperties.Name="自动解锁" Toggled="WatchRuleToggleChanged" />
+                </Grid>
+            </Border>
+            <Border Style="{StaticResource UnlockSettingRowStyle}">
+                <Grid Style="{StaticResource WatchSettingRowStyle}">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="解锁方式" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <ComboBox x:Name="UnlockModeBox" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                              AutomationProperties.Name="解锁方式" Loaded="UnlockModeBox_Loaded"
+                              SelectionChanged="UnlockModeBox_SelectionChanged">
+                        <ComboBoxItem x:Name="PasswordUnlockMode" Content="自动解锁" />
+                        <ComboBoxItem x:Name="WindowsHelloMode" Content="仅亮屏" />
+                    </ComboBox>
+                </Grid>
+            </Border>
+            <StackPanel x:Name="PasswordUnlockSettings" Visibility="Collapsed">
+                <Border Style="{StaticResource UnlockSettingRowStyle}">
+                    <Grid Style="{StaticResource WatchSettingRowStyle}">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Style="{StaticResource WatchSettingLabelsStyle}">
+                            <TextBlock Text="Windows 登录密码" TextWrapping="Wrap" />
+                            <TextBlock x:Name="UnlockCredentialDescription" Text="输入你当前用于登录 Windows 的密码。"
+                                       Style="{StaticResource WatchSettingDetailStyle}" />
+                        </StackPanel>
+                        <Button x:Name="SetUnlockCredentialButton" Grid.Column="1" Content="输入 Windows 登录密码"
+                                Click="SetUnlockCredential_Click" VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource UnlockSettingRowStyle}">
+                    <Grid Style="{StaticResource WatchSettingRowStyle}">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Style="{StaticResource WatchSettingLabelsStyle}">
+                            <TextBlock Text="验证手表解锁状态" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="4" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="开启后可防止他人盗用你的手表解锁" VerticalAlignment="Center"
+                                           Style="{StaticResource WatchSettingDetailStyle}" />
+                                <Button Grid.Column="1" Style="{StaticResource WatchSettingHelpStyle}"
+                                        AutomationProperties.Name="Apple Watch 何时解锁"
+                                        ToolTipService.ToolTip="已设置密码且开启「手腕检测」时，Apple Watch 摘下后会自动锁定。重新佩戴后，可输入手表密码解锁。如果已开启「用 iPhone 解锁」，也可以在手表附近解锁配对的 iPhone。" />
+                            </Grid>
+                        </StackPanel>
+                        <ToggleSwitch x:Name="RequireWatchUnlockedSwitch" Grid.Column="1" Style="{StaticResource WatchSettingSwitchStyle}"
+                                      AutomationProperties.Name="验证手表解锁状态" Toggled="WatchRuleToggleChanged" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource UnlockSettingRowStyle}">
+                    <Grid Style="{StaticResource WatchSettingRowStyle}">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel Style="{StaticResource WatchSettingLabelsStyle}">
+                            <TextBlock Text="使用增强的蓝牙加密认证" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="4" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="开启后可防止广播回放攻击" VerticalAlignment="Center"
+                                           Style="{StaticResource WatchSettingDetailStyle}" />
+                                <Button Grid.Column="1" Style="{StaticResource WatchSettingHelpStyle}"
+                                        AutomationProperties.Name="什么是广播回放攻击"
+                                        ToolTipService.ToolTip="广播回放是指把手表之前发出的蓝牙广播录下来，再原样重发，让电脑误以为手表就在附近。开启增强认证后，其他人无法使用广播重放来伪装你的手表解锁 Windows。" />
+                            </Grid>
+                        </StackPanel>
+                        <ToggleSwitch x:Name="RequireEncryptedConnectionSwitch" Grid.Column="1" Style="{StaticResource WatchSettingSwitchStyle}"
+                                      AutomationProperties.Name="使用增强的蓝牙加密认证" Toggled="WatchRuleToggleChanged" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+            <Border x:Name="WindowsHelloSettings" Style="{StaticResource UnlockSettingRowStyle}" Visibility="Collapsed">
+                <StackPanel Style="{StaticResource WatchSettingLabelsStyle}">
+                    <TextBlock Text="Windows Hello" TextWrapping="Wrap" />
+                    <TextBlock Text="仅亮屏，让Windows Hello解锁，安全性更高。" Style="{StaticResource WatchSettingDetailStyle}" />
+                    <TextBlock x:Name="WatchWakeStatus" Style="{StaticResource WatchSettingDetailStyle}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Border>
+
+    <TextBlock Text="自动锁定" Style="{StaticResource BodyStrongTextBlockStyle}"
+               Margin="0,16,0,0" AutomationProperties.HeadingLevel="Level2" />
+    <Border Style="{StaticResource WatchSettingCardStyle}">
+        <Grid Style="{StaticResource WatchSettingRowStyle}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Style="{StaticResource WatchSettingLabelsStyle}">
+                <TextBlock Text="自动锁定" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                <TextBlock Text="手表信号持续变弱且电脑无输入时锁屏。" Style="{StaticResource WatchSettingDetailStyle}" />
+            </StackPanel>
+            <ToggleSwitch x:Name="AutoLockSwitch" Grid.Column="1" Style="{StaticResource WatchSettingSwitchStyle}"
+                          AutomationProperties.Name="自动锁定" Toggled="WatchRuleToggleChanged" />
+        </Grid>
+    </Border>
+</StackPanel>
+
 <StackPanel x:Name="MonitorPage" Grid.Row="1" Spacing="12">
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="8">
-            <TextBlock Text="Apple Watch 蓝牙配对" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <TextBlock x:Name="PairingStatus" Text="准备好手表后，打开配对窗口。" TextWrapping="Wrap"
-                       AutomationProperties.LiveSetting="Polite" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="PairButton" Content="开始配对" Click="StartPairing_Click" />
-                <Button x:Name="CancelPairButton" Content="停止配对" Click="StopPairing_Click" Visibility="Collapsed" />
-            </StackPanel>
-        </StackPanel>
-    </Border>
-
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="8">
-            <ComboBox x:Name="PairedWatchBox" Header="Windows 已配对设备" PlaceholderText="选择你的 Apple Watch"
-                      SelectionChanged="PairedWatchBox_SelectionChanged" HorizontalAlignment="Left" MinWidth="200" />
-            <TextBlock x:Name="ConnectionStatusText" Text="正在查找已配对设备…" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                <Button x:Name="StartScanButton" Content="开始检测" Click="StartScan_Click"
-                        Style="{StaticResource AccentButtonStyle}" IsEnabled="False" />
-                <Button x:Name="StopScanButton" Content="停止" Click="StopScan_Click" IsEnabled="False" />
-                <Button x:Name="RefreshWatchesButton" Content="刷新设备" Click="RefreshWatches_Click" />
-                <Button x:Name="RemoveWatchButton" Content="移除设备" Click="RemoveWatch_Click" IsEnabled="False" />
-            </StackPanel>
-        </StackPanel>
-    </Border>
-
     <InfoBar x:Name="ScanError" IsClosable="False" Severity="Warning" />
-
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="8">
-            <ToggleSwitch x:Name="WatchWakeSwitch" Header="手表靠近时亮屏，使用 Windows Hello" Toggled="WatchRuleToggleChanged" />
-            <TextBlock Text="电脑锁屏且熄屏时，手表返回可请求亮屏，登录由 Windows Hello 验证。开启此选项会关闭密码式自动解锁，两种方式可在这里和「高级选项」切换。"
-                       TextWrapping="Wrap" />
-            <TextBlock x:Name="WatchWakeStatus" Text="请先开始手表检测。" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <HyperlinkButton x:Name="OpenSignInOptionsLink" Content="打开 Windows 登录选项" Click="OpenSignInOptions_Click" />
-            <InfoBar x:Name="SignInOptionsError" IsClosable="True" Severity="Warning"
-                     Message="无法打开登录选项。请在 Windows 设置中打开「账户 → 登录选项」。" />
-        </StackPanel>
-    </Border>
-
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="8">
-            <TextBlock Text="Apple Watch 自动解锁（实验功能）" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <TextBlock x:Name="DirectUnlockStatus" Text="需要 Windows 登录组件和 IRK 匹配。" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <Button x:Name="DirectUnlockButton" Content="开启自动解锁…" IsEnabled="False" Click="DirectUnlock_Click" />
-            <Button x:Name="SetUnlockCredentialButton" Content="设置解锁凭据…" Visibility="Collapsed" Click="SetUnlockCredential_Click" />
-        </StackPanel>
-    </Border>
+    <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="StartScanButton" Content="开始检测" Click="StartScan_Click"
+                Style="{StaticResource AccentButtonStyle}" IsEnabled="False" />
+        <Button x:Name="StopScanButton" Content="停止" Click="StopScan_Click" IsEnabled="False" />
+    </StackPanel>
 
     <Border Style="{StaticResource SettingsCardStyle}">
         <StackPanel Spacing="8">
             <TextBlock x:Name="PresenceText" Style="{StaticResource SubtitleTextBlockStyle}" TextWrapping="Wrap" />
             <TextBlock x:Name="LastSeenText" TextWrapping="Wrap" />
-            <TextBlock x:Name="RssiText" TextWrapping="Wrap" />
+            <TextBlock x:Name="RssiText" TextWrapping="Wrap" Visibility="Collapsed" />
             <TextBlock x:Name="PacketCountText" TextWrapping="Wrap"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
@@ -255,7 +400,7 @@ SizeChanged="ContentScrollViewer_SizeChanged">
         </StackPanel>
     </Border>
 
-    <Border Style="{StaticResource SettingsCardStyle}">
+    <Border x:Name="RawAdvertisementsCard" Style="{StaticResource SettingsCardStyle}" Visibility="Collapsed">
         <StackPanel Spacing="8">
             <TextBlock Text="蓝牙广播" Style="{StaticResource SubtitleTextBlockStyle}" />
             <StackPanel Orientation="Horizontal" Spacing="24">
@@ -323,70 +468,12 @@ SizeChanged="ContentScrollViewer_SizeChanged">
     <Border Style="{StaticResource SettingsCardStyle}">
         <StackPanel Spacing="8">
             <TextBlock Text="Apple Watch 蓝牙连接测试" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            <TextBlock Text="测试在场检测页选中的手表。确认连接后立即结束，等待新连接最多 10 秒。"
+            <TextBlock Text="测试当前手表。确认连接后立即结束，等待新连接最多 10 秒。"
                        TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <TextBlock x:Name="WatchConnectionLiveStatus" Text="当前连接（Windows）：未选择手表"
                        TextWrapping="Wrap" Style="{StaticResource BodyStrongTextBlockStyle}" />
             <Button x:Name="TestWatchConnectionButton" Content="测试蓝牙连接" Click="TestWatchConnection_Click" />
             <InfoBar x:Name="WatchConnectionTestStatus" IsClosable="False" />
-        </StackPanel>
-    </Border>
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="12">
-            <ToggleSwitch x:Name="AutoUnlockSwitch" Header="使用已保存的密码自动解锁" Toggled="WatchRuleToggleChanged" />
-            <TextBlock Text="手动锁屏后，先确认手表离开，再按下方条件判断返回。自动锁屏后，或 Windows 从睡眠恢复且仍锁屏时，直接按下方条件判断。满足条件后向 Windows 发起一次认证。" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <StackPanel Spacing="4">
-                <NumberBox x:Name="UnlockDelayBox" Header="锁定后最短解锁等待（秒）" Minimum="0" Maximum="300"
-                           SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                           ValueChanged="WatchRuleValueChanged" />
-                <TextBlock Text="默认 0 秒。等待结束后，只统计这之后收到的强信号。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Spacing="4">
-                <NumberBox x:Name="ReturnRssiBox" Header="强信号最低 RSSI（dBm）"
-                           Minimum="-126" Maximum="-1" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                           ValueChanged="WatchRuleValueChanged" />
-                <TextBlock Text="默认 −50 dBm。RSSI 大于或等于此值的广播才算强信号。例如设为 −55 dBm 时，−55 和 −54 dBm 都达标。阈值越低，越弱的信号也能计入。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Spacing="4">
-                <NumberBox x:Name="ReturnWindowBox" Header="强信号统计窗口（秒）"
-                           Minimum="1" Maximum="30" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                           ValueChanged="WatchRuleValueChanged" />
-                <TextBlock Text="默认 2 秒。每次判定时，从当前时刻往前统计这个时长内的达标广播。窗口越长，越能容纳间隔较大的广播。条数一旦达标即可发起认证。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Spacing="4">
-                <NumberBox x:Name="ReturnPacketCountBox" Header="窗口内所需广播数"
-                           Minimum="1" Maximum="10" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                           ValueChanged="WatchRuleValueChanged" />
-                <TextBlock Text="默认 1 条。统计窗口内每条符合条件的配对手表广播各计一次。提高条数可避免单条强信号触发，也可能使解锁变慢。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Spacing="4">
-                <ToggleSwitch x:Name="RequireWatchUnlockedSwitch" Header="仅在手表有解锁线索时解锁电脑" Toggled="WatchRuleToggleChanged" />
-                <TextBlock Text="默认关闭。开启后，每条计入的强信号广播都必须带有 Nearby Info，且解锁位 0x80 置位、锁定位 0x20 清零。字段缺失或两位同时置位的广播不计入。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-            <StackPanel Spacing="4">
-                <ToggleSwitch x:Name="RequireEncryptedConnectionSwitch" Header="验证手表的蓝牙连接" Toggled="WatchRuleToggleChanged" />
-                <TextBlock Text="Windows 确认已配对手表处于连接状态即可通过。手表尚未连接时，需要建立新连接并确认加密。" TextWrapping="Wrap"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
-        </StackPanel>
-    </Border>
-    <Border Style="{StaticResource SettingsCardStyle}">
-        <StackPanel Spacing="12">
-            <ToggleSwitch x:Name="AutoLockSwitch" Header="自动锁定" Toggled="WatchRuleToggleChanged" />
-            <NumberBox x:Name="WeakRssiBox" Header="弱信号阈值（dBm）" Minimum="-126" Maximum="-1"
-                       SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                       ValueChanged="WatchRuleValueChanged" />
-            <NumberBox x:Name="VeryWeakRssiBox" Header="极弱信号阈值（dBm）" Minimum="-126" Maximum="-1"
-                       SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="200"
-                       ValueChanged="WatchRuleValueChanged" />
-            <TextBlock x:Name="AutoLockRuleDescription" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
     </Border>
     <Border Style="{StaticResource SettingsCardStyle}">
@@ -397,8 +484,145 @@ SizeChanged="ContentScrollViewer_SizeChanged">
         </StackPanel>
     </Border>
 </StackPanel>
+<StackPanel x:Name="DiagnosticsPage" Grid.Row="1" Spacing="12" Visibility="Collapsed">
+    <Border Style="{StaticResource SettingsCardStyle}">
+        <StackPanel Spacing="8">
+            <TextBlock Text="诊断日志" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <Button Content="打开应用日志目录" Click="OpenLogs_Click" />
+            <Button Content="打开服务日志目录" Click="OpenServiceLogs_Click" />
+        </StackPanel>
+    </Border>
+    <Border Style="{StaticResource SettingsCardStyle}">
+        <StackPanel Spacing="8">
+            <TextBlock Text="清除应用数据" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <TextBlock Text="按类别选择要清除的内容，然后重启 UnlockPC。" TextWrapping="Wrap"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Button x:Name="ResetDataButton" Content="分类清除并重启…" Click="ResetData_Click" />
+        </StackPanel>
+    </Border>
+    <InfoBar x:Name="DiagnosticsStatus" IsClosable="True" />
+</StackPanel>
+<StackPanel x:Name="AboutPage" Grid.Row="1" Spacing="12" Visibility="Collapsed">
+    <Border Style="{StaticResource SettingsCardStyle}">
+        <StackPanel Spacing="8">
+            <TextBlock Text="UnlockPC" Style="{StaticResource SubtitleTextBlockStyle}" />
+            <TextBlock x:Name="AboutVersionText" />
+            <TextBlock Text="用 Apple Watch 检测在场，并按设定管理 Windows 锁定和解锁。" TextWrapping="Wrap"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <HyperlinkButton Content="GitHub 项目" NavigateUri="https://github.com/codeage/UnlockPC" />
+        </StackPanel>
+    </Border>
+</StackPanel>
 </Grid>
 </ScrollViewer>
+    <Grid x:Name="RadarDebugPanel" Margin="0,60,24,16" Width="320" MaxHeight="600" RowSpacing="10"
+          HorizontalAlignment="Right" VerticalAlignment="Top" Visibility="Collapsed">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border x:Name="WatchBroadcastCard" MaxHeight="420" Padding="14,12" CornerRadius="10"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Border.Resources>
+                <Style x:Key="WatchFieldLabel" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                    <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Style>
+                <Style x:Key="WatchFieldValue" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                </Style>
+            </Border.Resources>
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="手表状态" FontSize="16" FontWeight="SemiBold" />
+                <Grid Grid.Row="1">
+                    <TextBlock x:Name="WatchBroadcastStoppedText" Text="检测已停止" Style="{StaticResource WatchFieldLabel}" Visibility="Collapsed" />
+                    <Grid x:Name="WatchBroadcastSummary" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="佩戴" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchWristValue" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="锁定" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchLockValue" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2">
+                            <TextBlock Text="屏幕" Style="{StaticResource WatchFieldLabel}" />
+                            <TextBlock x:Name="WatchScreenValue" Style="{StaticResource BodyStrongTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+                <ScrollViewer x:Name="WatchBroadcastScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                              AutomationProperties.Name="手表广播状态位">
+                    <StackPanel Spacing="8">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Nearby Info  0x10" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="WatchNearbySourceText" Style="{StaticResource WatchFieldLabel}" />
+                            <StackPanel x:Name="WatchNearbyDetails" Spacing="6">
+                                <TextBlock x:Name="WatchNearbyInfoText" Style="{StaticResource WatchFieldValue}" />
+                                <Grid ColumnSpacing="8" RowSpacing="4">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock Text="锁定线索" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchLockFlagText" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="1" Text="解锁线索" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchAutoUnlockFlagText" Grid.Row="1" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="2" Text="手表自动解锁" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchWatchUnlockFlagText" Grid.Row="2" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                    <TextBlock Grid.Row="3" Text="认证标签" Style="{StaticResource WatchFieldLabel}" />
+                                    <TextBlock x:Name="WatchAuthTagText" Grid.Row="3" Grid.Column="1" Style="{StaticResource WatchFieldValue}" />
+                                </Grid>
+                                <TextBlock x:Name="WatchOtherFlagsText" Style="{StaticResource WatchFieldLabel}" />
+                            </StackPanel>
+                        </StackPanel>
+                        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Magic Switch  0x0B" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="WatchMagicSwitchText" Style="{StaticResource WatchFieldValue}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+        <Border x:Name="LockActivityCard" Grid.Row="1" VerticalAlignment="Top" Padding="14,12" CornerRadius="10"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="锁定与解锁流程" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock x:Name="LockActivityEmptyText" Grid.Row="1" Text="暂无记录" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" Style="{StaticResource CaptionTextBlockStyle}" />
+                <ScrollViewer x:Name="LockActivityScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled"
+                              AutomationProperties.Name="锁定与解锁过程记录">
+                    <ItemsControl x:Name="LockActivityItems">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:LockActivityEntry">
+                                <Grid Margin="0,0,6,10" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind Timestamp}" FontFamily="Consolas" FontSize="12" Margin="0,2,0,0"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind Message}" TextWrapping="Wrap"
+                                               Style="{StaticResource BodyTextBlockStyle}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</Grid>
 </NavigationView>
 </Grid>
 </Grid>

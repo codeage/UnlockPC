@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
@@ -21,6 +21,7 @@ internal sealed class PresenceScan : IDisposable
     private bool _disposed;
     private BluetoothError? _stopError;
     private long _lastReceived;
+    private DateTimeOffset _sampleFloor;
     private long _lastNear;
     private DateTimeOffset _lastNearSeenAt;
     private bool _lastNearWasIrkOnly;
@@ -31,10 +32,14 @@ internal sealed class PresenceScan : IDisposable
     private long _total;
     private long _matched;
     private ObservationTrial? _trial;
-    private IrkResolver? _irk;
+    private BondedIrk? _irk;
+    private readonly SemaphoreSlim _irkStartGate = new(1);
+    private readonly CancellationTokenSource _lifetime = new();
+    private int _irkGeneration;
+    private int _pendingAdvertisements;
     private readonly HashSet<ulong> _resolvedAddresses = [];
     private long _irkMatched;
-    private DateTimeOffset? _lastIrkMatch;
+    private MatchSample? _lastIrkMatch;
     private AppleWatchBroadcast _watchBroadcast;
 
     public AdvertisementHistory Advertisements { get; } = new();
@@ -61,6 +66,35 @@ internal sealed class PresenceScan : IDisposable
         _deviceWatcher.Start();
         _watcher.Start();
         BluetoothLog.Write("scan_started", new { address = BluetoothLog.AddressLabel(_deviceAddress), connected = _connected, status = _watcher.Status.ToString() });
+    }
+
+    public void ResetForResume()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _removed)
+                return;
+
+            _sampleFloor = DateTimeOffset.UtcNow;
+            UnsubscribeWatcher();
+            var previous = _watcher;
+            _watcher = CreateWatcher();
+            _stopError = null;
+            _lastReceived = _lastNear = _total = _matched = _irkMatched = 0;
+            _lastNearSeenAt = _lastUnlockSampleSeenAt = default;
+            _lastNearWasIrkOnly = _unlockSamplesDropped = false;
+            _lastMatch = _lastIrkMatch = null;
+            _trial = null;
+            _watchBroadcast = default;
+            _unlockSamples.Clear();
+            _resolvedAddresses.Clear();
+            Advertisements.Clear();
+            if (previous.Status == BluetoothLEAdvertisementWatcherStatus.Started)
+                previous.Stop();
+            SubscribeWatcher();
+            _watcher.Start();
+            BluetoothLog.Write("scan_resume_reset");
+        }
     }
 
     public void RestartAfterResume()
@@ -117,38 +151,76 @@ internal sealed class PresenceScan : IDisposable
             return new ScanSnapshot(status, _stopError, _total, _matched, _lastMatch,
                 _lastMatch is null ? null : Stopwatch.GetElapsedTime(_lastReceived), _connected, _removed, _lastNear,
                 unlockSamples, unlockSamplesDropped,
-                _irk is null ? null : new IrkSnapshot(_irkMatched, _resolvedAddresses.Count, _lastIrkMatch), _watchBroadcast);
+                _irk is { IsActive: true } ? new IrkSnapshot(_irkMatched, _resolvedAddresses.Count, _lastIrkMatch) : null, _watchBroadcast);
         }
     }
 
-    public bool StartIrkObservation(byte[] key)
+    public async Task<bool> StartIrkObservationAsync(ulong bondAddress, CancellationToken token = default)
     {
+        int generation;
+        CancellationTokenSource cancellation;
         lock (_gate)
         {
-            if (_disposed || _removed || _irk is not null ||
-                _watcher.Status != BluetoothLEAdvertisementWatcherStatus.Started)
+            if (_disposed)
                 return false;
-
-            _irk = new IrkResolver(key);
-            _watchBroadcast = default;
-            BluetoothLog.Write("scan_irk_started", new { pairedAddress = BluetoothLog.AddressLabel(_deviceAddress) });
-            return true;
+            generation = _irkGeneration;
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
         }
+
+        using (cancellation)
+        {
+            await _irkStartGate.WaitAsync(cancellation.Token).ConfigureAwait(false);
+            try
+            {
+                lock (_gate)
+                {
+                    if (!CanAttach())
+                        return false;
+                    if (_irk is { IsActive: true })
+                        return true;
+                    ClearIrkObservation();
+                }
+
+                var monitor = await BondedIrk.OpenAsync(bondAddress, cancellation.Token).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (!CanAttach() || cancellation.IsCancellationRequested)
+                    {
+                        monitor.Dispose();
+                        return false;
+                    }
+                    _irk = monitor;
+                    _watchBroadcast = default;
+                    BluetoothLog.Write("scan_irk_started", new { pairedAddress = BluetoothLog.AddressLabel(bondAddress) });
+                    return true;
+                }
+            }
+            finally { _irkStartGate.Release(); }
+        }
+
+        bool CanAttach() => !_disposed && !_removed && generation == _irkGeneration &&
+            _watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started;
     }
 
-    public byte[]? CopyIrk()
+    public Task<bool> ResolvesAsync(ulong address)
     {
         lock (_gate)
-            return _irk?.CopyKey();
+            return _irk?.ResolvesAsync(address) ?? Task.FromResult(false);
     }
 
     public void StopIrkObservation()
     {
         lock (_gate)
         {
-            if (_irk is null)
-                return;
+            _irkGeneration++;
+            ClearIrkObservation();
+        }
+    }
 
+    private void ClearIrkObservation()
+    {
+        if (_irk is not null)
+        {
             _irk.Dispose();
             _irk = null;
             BluetoothLog.Write("scan_irk_finished", new { matched = _irkMatched, distinctAddresses = _resolvedAddresses.Count });
@@ -195,21 +267,48 @@ internal sealed class PresenceScan : IDisposable
         }
     }
 
-    private void OnReceived(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementReceivedEventArgs args)
+    private async void OnReceived(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementReceivedEventArgs args)
+    {
+        BondedIrk? resolver;
+        Task<bool>? match = null;
+        lock (_gate)
+        {
+            if (_disposed || !ReferenceEquals(sender, _watcher) || args.Timestamp <= _sampleFloor)
+                return;
+            resolver = _irk;
+            if (!_removed && !args.IsAnonymous && args.BluetoothAddressType == BluetoothAddressType.Random &&
+                _pendingAdvertisements < UnlockSampleLimit)
+            {
+                match = resolver?.ResolvesAsync(args.BluetoothAddress);
+                if (match is not null)
+                    _pendingAdvertisements++;
+            }
+        }
+
+        bool resolved = false;
+        if (match is not null)
+        {
+            try { resolved = await match.ConfigureAwait(false); }
+            finally { lock (_gate) _pendingAdvertisements--; }
+        }
+        ProcessReceived(sender, args, resolver, resolved);
+    }
+
+    private void ProcessReceived(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementReceivedEventArgs args,
+        BondedIrk? resolver, bool resolved)
     {
         Action? notify = null;
         object? diagnostic = null;
         lock (_gate)
         {
-            if (_disposed || !ReferenceEquals(sender, _watcher))
+            if (_disposed || !ReferenceEquals(sender, _watcher) || args.Timestamp <= _sampleFloor)
                 return;
 
             _total++;
             ulong address = args.BluetoothAddress;
             bool hasAddress = !_removed && !args.IsAnonymous;
             bool windowsAddressMatch = hasAddress && address == _deviceAddress;
-            bool irkAddressMatch = hasAddress && _irk is { } resolver &&
-                args.BluetoothAddressType == BluetoothAddressType.Random && resolver.Resolves(address);
+            bool irkAddressMatch = hasAddress && resolved && resolver is { IsActive: true } && ReferenceEquals(resolver, _irk);
             bool validRssi = args.RawSignalStrengthInDBm is > -127 and not 127;
             bool windowsMatch = windowsAddressMatch && validRssi;
             bool irkMatch = irkAddressMatch && validRssi;
@@ -217,8 +316,8 @@ internal sealed class PresenceScan : IDisposable
             if (irkMatch)
             {
                 _irkMatched++;
-                if (_lastIrkMatch is not { } last || args.Timestamp > last)
-                    _lastIrkMatch = args.Timestamp;
+                if (_lastIrkMatch is not { } last || args.Timestamp > last.SeenAt)
+                    _lastIrkMatch = new MatchSample(args.Timestamp, args.RawSignalStrengthInDBm);
 
                 if (_resolvedAddresses.Add(address))
                     BluetoothLog.Write("scan_irk_address_resolved", new
@@ -372,6 +471,7 @@ internal sealed class PresenceScan : IDisposable
                 return;
 
             _disposed = true;
+            _lifetime.Cancel();
             StopIrkObservation();
             BluetoothLog.Write("scan_closed", new { matched = _matched, total = _total, connected = _connected });
             _trial = null;
@@ -385,6 +485,7 @@ internal sealed class PresenceScan : IDisposable
             _deviceWatcher.Stop();
         if (_watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started)
             _watcher.Stop();
+        _lifetime.Dispose();
     }
 }
 
@@ -392,6 +493,13 @@ internal readonly record struct ScanSnapshot(
     BluetoothLEAdvertisementWatcherStatus Status, BluetoothError? Error, long Total, long Matched,
     MatchSample? LastMatch, TimeSpan? MatchAge, bool? IsConnected, bool DeviceRemoved, long LastNear,
     WatchSignalSample[] UnlockSamples, bool UnlockSamplesDropped,
-    IrkSnapshot? Irk, AppleWatchBroadcast WatchBroadcast);
+    IrkSnapshot? Irk, AppleWatchBroadcast WatchBroadcast)
+{
+    public MatchSample? LatestMatchedSample =>
+        Irk?.LastMatch is { } irk && (LastMatch is null || irk.SeenAt > LastMatch.Value.SeenAt) ? irk : LastMatch;
+}
 
-internal readonly record struct IrkSnapshot(long Matched, int DistinctAddresses, DateTimeOffset? LastSeen);
+internal readonly record struct IrkSnapshot(long Matched, int DistinctAddresses, MatchSample? LastMatch)
+{
+    public DateTimeOffset? LastSeen => LastMatch?.SeenAt;
+}

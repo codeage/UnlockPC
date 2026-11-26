@@ -6,7 +6,8 @@ internal sealed record WatchRuleSettings(
     bool AutoUnlock = true, bool AutoLock = true,
     int ReturnRssi = -50, int ReturnWindowSeconds = 2, int ReturnPacketCount = 1,
     bool RequireWatchUnlocked = false, bool RequireEncryptedConnection = false, bool SpeakLockActivity = false,
-    int WeakRssi = -75, int VeryWeakRssi = -85, int UnlockDelaySeconds = 0, bool WakeWithWindowsHello = false)
+    int WeakRssi = -75, int VeryWeakRssi = -85, int UnlockDelaySeconds = 0, bool WakeWithWindowsHello = false,
+    bool PreferredWindowsHello = false)
 {
     public bool IsValid() =>
         ReturnRssi is >= -126 and <= -1 &&
@@ -19,8 +20,7 @@ internal sealed record WatchRuleSettings(
 
 internal sealed class WatchRuleStore(string path)
 {
-    public static WatchRuleStore ForCurrentUser() => new(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UnlockPC", "watch-rules.json"));
+    public static WatchRuleStore ForCurrentUser() => new(AppDataPaths.WatchRules);
 
     public WatchRuleSettings Read()
     {
@@ -34,6 +34,8 @@ internal sealed class WatchRuleStore(string path)
                 settings = settings with
                 {
                     AutoUnlock = settings.AutoUnlock && !settings.WakeWithWindowsHello,
+                    PreferredWindowsHello = settings.WakeWithWindowsHello ||
+                        (!settings.AutoUnlock && settings.PreferredWindowsHello),
                     ReturnRssi = ReadLegacyValue(nameof(settings.ReturnRssi), "UnlockRssi", settings.ReturnRssi, -126, -1),
                     ReturnWindowSeconds = ReadLegacyValue(nameof(settings.ReturnWindowSeconds), "UnlockSeconds", settings.ReturnWindowSeconds, 1, 30),
                     ReturnPacketCount = ReadLegacyValue(nameof(settings.ReturnPacketCount), "UnlockCount", settings.ReturnPacketCount, 1, 10),

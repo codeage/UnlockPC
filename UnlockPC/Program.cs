@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -16,6 +16,16 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == IrkServiceInstallation.InstallArgument)
+        {
+            Environment.ExitCode = args.Length == 2 ? IrkServiceInstallation.Install(args[1]) : 87;
+            return;
+        }
+        if (args is [WatchMonitor.Argument])
+        {
+            Environment.ExitCode = WatchMonitor.Run();
+            return;
+        }
         if (args is [ProviderRegistration.InstallArgument])
         {
             Environment.ExitCode = ProviderRegistration.Install();
@@ -26,7 +36,7 @@ internal static class Program
             Environment.ExitCode = WatchLockPolicySelfTest.Run();
             return;
         }
-        if (args is ["--ui-self-test", "signin-options" or "advanced-options" or "watch-broadcast" or "watch-encryption"])
+        if (args is ["--ui-self-test", "advanced-options" or "watch-broadcast" or "watch-encryption"])
         {
             Environment.ExitCode = 1;
             RunApp(() => new App(args[1]));
