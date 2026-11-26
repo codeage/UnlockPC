@@ -109,6 +109,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private var processing = false
     private var exchange = 0
     private var exchangeTimeout: Task<Void, Never>?
+    private var lastReplyTime: ContinuousClock.Instant?
+    private var lastHandledReplyTime: ContinuousClock.Instant?
 
     @Published private(set) var armed = false
     @Published private(set) var status = "等待布防"
@@ -145,10 +147,27 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     func handleBackground() async {
-        let deadline = ContinuousClock.now + .seconds(8)
+        let started = ContinuousClock.now
+        let deadline = started + .seconds(8)
         let initialExchange = exchange
-        while armed && exchange == initialExchange && ContinuousClock.now < deadline {
-            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+        log.notice("Background Bluetooth task started")
+        var reason = "timeout or closed exchange"
+        defer {
+            let elapsed = started.duration(to: .now).components
+            let milliseconds = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
+            log.notice("Background Bluetooth task returned after \(milliseconds) ms: \(reason, privacy: .public)")
+        }
+        while armed && !Task.isCancelled {
+            let now = ContinuousClock.now
+            // Core Bluetooth may finish replying before the SwiftUI background handler starts.
+            if let reply = lastReplyTime, reply != lastHandledReplyTime,
+               reply.duration(to: now) <= .seconds(4) {
+                lastHandledReplyTime = reply
+                reason = "reply completed"
+                return
+            }
+            guard exchange == initialExchange, now < deadline else { return }
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
         }
     }
 
@@ -180,6 +199,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     private func disarm() {
         armed = false
+        lastReplyTime = nil
         UserDefaults.standard.removeObject(forKey: armedPIDKey)
         if central.isScanning { central.stopScan() }
         finishExchange("已取消布防")
@@ -302,6 +322,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if armed, processing, peripheral.identifier == peer?.identifier, characteristic.uuid == eventID {
+            lastReplyTime = .now
             finishExchange(error == nil ? "已提交提醒并回传结果" : "已提交提醒，回执发送失败")
         }
     }
