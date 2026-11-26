@@ -258,6 +258,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = UnlockPC;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -274,6 +275,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = UnlockPC;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+			INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -289,6 +291,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Watch/Info.plist;
+			CODE_SIGN_ENTITLEMENTS = Watch/UnlockPCWatch.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -305,6 +308,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Watch/Info.plist;
+			CODE_SIGN_ENTITLEMENTS = Watch/UnlockPCWatch.entitlements;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bytereset.unlockpc.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
