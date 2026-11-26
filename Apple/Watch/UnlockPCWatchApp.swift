@@ -42,9 +42,6 @@ private struct WatchHomeView: View {
                     if let received = alerts.lastReceived {
                         LabeledContent("最近收包") { Text(received, style: .time) }
                     }
-                    Button("允许通知") {
-                        Task { await alerts.requestPermission() }
-                    }
                     Button(alerts.isScanning ? "停止搜索" : "搜索电脑") {
                         alerts.toggleScan()
                     }

@@ -55,17 +55,6 @@ final class TestAlerts: NSObject, ObservableObject {
         ])
     }
 
-    func requestPermission(onlyIfUndetermined: Bool = false) async {
-        let settings = await notificationCenter.notificationSettings()
-        if onlyIfUndetermined && settings.authorizationStatus != .notDetermined { return }
-        do {
-            let allowed = try await notificationCenter.requestAuthorization(options: [.alert, .sound])
-            status = allowed ? "已允许通知" : "通知已关闭，可在系统设置中开启"
-        } catch {
-            report("无法请求通知权限", error: error)
-        }
-    }
-
     func toggleScan() {
         if isScanning {
             stopScan()
