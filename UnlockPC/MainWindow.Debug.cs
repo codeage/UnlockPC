@@ -8,6 +8,7 @@ public sealed partial class MainWindow
 {
     private NavigationViewItem? _debugItem;
     private StackPanel? _debugPage;
+    private readonly WatchAlertTestPanel _watchAlertTestPanel = new();
     private readonly Button _debugLockButton = new()
     {
         Content = "锁定",
@@ -29,6 +30,7 @@ public sealed partial class MainWindow
 
     partial void InitializeDebugPage()
     {
+        Closed += (_, _) => _watchAlertTestPanel.Close();
         _debugRulePanel = new StackPanel { Spacing = 12 };
         _debugRulePanel.Children.Add(_debugRuleStatus);
         _debugRulePanel.Children.Add(new TextBlock { Text = "锁定与解锁参数" });
@@ -94,6 +96,7 @@ public sealed partial class MainWindow
             ShowDebugPage();
         else if (_debugItem is not null)
         {
+            _watchAlertTestPanel.Stop();
             SetDebugDetailsEnabled(false);
             RootNavigationView.SelectedItem = AboutItem;
             _debugItem.Visibility = Visibility.Collapsed;
@@ -115,6 +118,7 @@ public sealed partial class MainWindow
                 Text = "已显示雷达的 RSSI 和估算距离、设备检测页右上角的手表状态和锁定与解锁流程及原始广播。",
                 TextWrapping = TextWrapping.Wrap
             });
+            _debugPage.Children.Add(_watchAlertTestPanel.View);
             _debugPage.Children.Add(_debugRulePanel);
             Grid.SetRow(_debugPage, 1);
             ContentColumn.Children.Add(_debugPage);

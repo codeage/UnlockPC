@@ -1,6 +1,5 @@
 import Combine
 @preconcurrency import CoreBluetooth
-import CryptoKit
 import Foundation
 import OSLog
 import UserNotifications
@@ -16,7 +15,6 @@ final class TestAlerts: NSObject, ObservableObject {
     @Published private(set) var candidates: [Candidate] = []
     @Published private(set) var isScanning = false
     @Published private(set) var hasSelection = false
-    @Published private(set) var hasCode = false
     @Published private(set) var lastReceived: Date?
 
     private let service = CBUUID(string: TestAlertPacket.serviceID)
@@ -27,7 +25,6 @@ final class TestAlerts: NSObject, ObservableObject {
     private let selectionKey = "testAlerts.selectedPeripheral"
     private let recentEventsKey = "testAlerts.recentEvents"
     private var central: CBCentralManager!
-    private var key: SymmetricKey?
     private var selection: UUID?
     private var peer: CBPeripheral?
     private var discovered: [UUID: CBPeripheral] = [:]
@@ -40,8 +37,6 @@ final class TestAlerts: NSObject, ObservableObject {
         super.init()
         selection = preferences.string(forKey: selectionKey).flatMap { UUID(uuidString: $0) }
         hasSelection = selection != nil
-        key = TestAlertKey.load()
-        hasCode = key != nil
         notificationCenter.delegate = self
         // Keep this identifier stable so Core Bluetooth can restore the selected connection.
         central = CBCentralManager(delegate: self, queue: nil, options: [
@@ -58,24 +53,6 @@ final class TestAlerts: NSObject, ObservableObject {
         } catch {
             report("无法请求通知权限", error: error)
         }
-    }
-
-    func saveCode(_ code: String) -> Bool {
-        let digits = code.filter { !$0.isWhitespace }
-        guard digits.utf8.count == 20, digits.utf8.allSatisfy({ (48...57).contains($0) }) else {
-            status = "请输入电脑显示的 20 位测试码"
-            return false
-        }
-        let data = Data(digits.utf8)
-        guard TestAlertKey.save(data) else {
-            status = "无法保存测试码"
-            return false
-        }
-        key = SymmetricKey(data: data)
-        hasCode = true
-        status = selection == nil ? "测试码已保存，可以搜索电脑" : "测试码已更新"
-        reconnectIfNeeded()
-        return true
     }
 
     func toggleScan() {
@@ -109,7 +86,7 @@ final class TestAlerts: NSObject, ObservableObject {
     }
 
     func select(_ id: UUID) {
-        guard let peripheral = discovered[id], key != nil else { return }
+        guard let peripheral = discovered[id] else { return }
         stopScan()
         candidates.removeAll()
         discovered.removeAll()
@@ -123,17 +100,11 @@ final class TestAlerts: NSObject, ObservableObject {
     }
 
     func forget() {
-        guard TestAlertKey.remove() else {
-            status = "无法删除测试码"
-            return
-        }
         stopScan()
         if let peer { central.cancelPeripheralConnection(peer) }
         peer = nil
         selection = nil
-        key = nil
         hasSelection = false
-        hasCode = false
         lastReceived = nil
         lastReceiptTime = nil
         notificationTask?.cancel()
@@ -166,7 +137,7 @@ final class TestAlerts: NSObject, ObservableObject {
     }
 
     private func reconnectIfNeeded() {
-        guard central.state == .poweredOn, key != nil, let selection else { return }
+        guard central.state == .poweredOn, let selection else { return }
         if let peripheral = peer ?? central.retrievePeripherals(withIdentifiers: [selection]).first {
             attach(peripheral)
         } else {
@@ -190,7 +161,7 @@ final class TestAlerts: NSObject, ObservableObject {
 
     private func receive(_ packet: Data) {
         let now = Date()
-        guard let key, let id = TestAlertPacket.eventID(in: packet, key: key, now: now) else {
+        guard let id = TestAlertPacket.eventID(in: packet, now: now) else {
             report("已丢弃无效或过期的测试事件")
             return
         }
@@ -262,7 +233,7 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, willRestoreState state: [String: Any]) {
-        guard key != nil, let selection,
+        guard let selection,
               let peripherals = state[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
               let restored = peripherals.first(where: { $0.identifier == selection }) else { return }
         peer = restored
@@ -296,7 +267,7 @@ extension TestAlerts: CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(
         _ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?
     ) {
-        guard peripheral.identifier == selection, central.state == .poweredOn, key != nil else { return }
+        guard peripheral.identifier == selection, central.state == .poweredOn else { return }
         report("连接中断，等待重新连接", error: error)
         central.connect(peripheral)
     }

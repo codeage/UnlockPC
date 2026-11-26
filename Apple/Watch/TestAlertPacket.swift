@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 enum TestAlertPacket {
@@ -6,14 +5,11 @@ enum TestAlertPacket {
     static let characteristicID = "C5AEE773-8378-4A75-A218-21505DC61F73"
     static let freshnessWindow: TimeInterval = 30
 
-    static func eventID(in packet: Data, key: SymmetricKey, now: Date) -> UUID? {
-        // Version, event type, UUID in network order, Unix seconds in big-endian order, HMAC.
-        guard packet.count == 54 else { return nil }
+    static func eventID(in packet: Data, now: Date) -> UUID? {
+        // Version, test event type, UUID in network order, Unix seconds in big-endian order.
+        guard packet.count == 22 else { return nil }
         let bytes = Array(packet)
-        guard bytes[0] == 1, bytes[1] == 1,
-              HMAC<SHA256>.isValidAuthenticationCode(
-                bytes.suffix(32), authenticating: bytes.prefix(22), using: key
-              ) else { return nil }
+        guard bytes[0] == 2, bytes[1] == 1 else { return nil }
         let timestamp = bytes[18..<22].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
         let age = now.timeIntervalSince1970 - Double(timestamp)
         guard age >= -5, age <= freshnessWindow else { return nil }

@@ -10,7 +10,6 @@
 		11A000000000000000000031 /* UnlockPCWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000021 /* UnlockPCWatchApp.swift */;};
 		11A000000000000000000032 /* TestAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000022 /* TestAlerts.swift */;};
 		11A000000000000000000033 /* TestAlertPacket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000023 /* TestAlertPacket.swift */;};
-		11A000000000000000000034 /* TestAlertKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000024 /* TestAlertKey.swift */;};
 		11A000000000000000000035 /* SharedAssets.xcassets in iPhone Resources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000026 /* SharedAssets.xcassets */;};
 		11A000000000000000000036 /* SharedAssets.xcassets in Watch Resources */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000026 /* SharedAssets.xcassets */;};
 		11A00000000000000000001C /* UnlockPC Watch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 11A000000000000000000009 /* UnlockPC Watch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); };};
@@ -45,7 +44,6 @@
 		11A000000000000000000021 /* UnlockPCWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockPCWatchApp.swift; sourceTree = "<group>";};
 		11A000000000000000000022 /* TestAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestAlerts.swift; sourceTree = "<group>";};
 		11A000000000000000000023 /* TestAlertPacket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestAlertPacket.swift; sourceTree = "<group>";};
-		11A000000000000000000024 /* TestAlertKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestAlertKey.swift; sourceTree = "<group>";};
 		11A000000000000000000008 /* UnlockPC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UnlockPC.app; sourceTree = BUILT_PRODUCTS_DIR;};
 		11A000000000000000000009 /* UnlockPC Watch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "UnlockPC Watch.app"; sourceTree = BUILT_PRODUCTS_DIR;};
 		11A000000000000000000025 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";};
@@ -94,7 +92,6 @@
 				11A000000000000000000021 /* UnlockPCWatchApp.swift */,
 				11A000000000000000000022 /* TestAlerts.swift */,
 				11A000000000000000000023 /* TestAlertPacket.swift */,
-				11A000000000000000000024 /* TestAlertKey.swift */,
 				11A000000000000000000025 /* Info.plist */,
 			);
 			path = Watch;
@@ -211,7 +208,6 @@
 				11A000000000000000000031 /* UnlockPCWatchApp.swift in Sources */,
 				11A000000000000000000032 /* TestAlerts.swift in Sources */,
 				11A000000000000000000033 /* TestAlertPacket.swift in Sources */,
-				11A000000000000000000034 /* TestAlertKey.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

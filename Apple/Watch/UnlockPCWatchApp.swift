@@ -19,7 +19,6 @@ struct UnlockPCWatchApp: App {
 private struct WatchHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var alerts: TestAlerts
-    @State private var code = ""
 
     var body: some View {
         NavigationStack {
@@ -32,18 +31,8 @@ private struct WatchHomeView: View {
                     Button("允许通知") {
                         Task { await alerts.requestPermission() }
                     }
-                    TextField("电脑上的测试码", text: $code, prompt: Text("20 位数字"))
-                        .privacySensitive()
-                    Button("保存测试码") {
-                        if alerts.saveCode(code) {
-                            code = ""
-                        }
-                    }
-                    .disabled(code.isEmpty)
-                    if alerts.hasCode {
-                        Button(alerts.isScanning ? "停止搜索" : "搜索电脑") {
-                            alerts.toggleScan()
-                        }
+                    Button(alerts.isScanning ? "停止搜索" : "搜索电脑") {
+                        alerts.toggleScan()
                     }
                 }
                 if !alerts.candidates.isEmpty {

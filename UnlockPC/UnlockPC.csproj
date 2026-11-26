@@ -25,8 +25,12 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
     <DefineConstants>$(DefineConstants);UNLOCKPC_DEBUG_PAGE</DefineConstants>
   </PropertyGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
+    <Compile Include="..\tools\WatchAlertTest\WatchAlertTestPublisher.cs" Link="WatchAlertTestPublisher.cs" />
+  </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' != 'Debug' or '$(ShippingBuild)' == 'true'">
     <Compile Remove="MainWindow.Debug.cs" />
+    <Compile Remove="WatchAlertTestPanel.cs" />
   </ItemGroup>
   <Target Name="RequireShippingPublish" BeforeTargets="PrepareForPublish"
           Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
