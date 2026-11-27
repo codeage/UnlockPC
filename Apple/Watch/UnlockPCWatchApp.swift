@@ -75,7 +75,7 @@ private struct WatchHomeView: View {
                     }
                 }
                 Section("蓝牙测试提醒") {
-                    Text(alerts.status)
+                    Text(broadcast.armed ? "广播已布防，普通蓝牙测试已暂停" : alerts.status)
                     if let received = alerts.lastReceived {
                         LabeledContent("最近收包") { Text(received, style: .time) }
                     }
