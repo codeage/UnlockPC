@@ -221,6 +221,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         content.title = "UnlockPC"
         content.body = "本地通知对照。"
         content.sound = .default
+        content.interruptionLevel = .timeSensitive
         do {
             try await center.add(UNNotificationRequest(identifier: TestAlerts.localControlID, content: content, trigger: nil))
             UserDefaults.standard.set(requested, forKey: localControlRequestKey)
@@ -361,6 +362,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             content.title = "UnlockPC"
             content.body = "收到 Windows 广播测试。"
             content.sound = .default
+            content.interruptionLevel = .timeSensitive
             do {
                 try await UNUserNotificationCenter.current().add(
                     UNNotificationRequest(identifier: token.uuidString, content: content, trigger: nil)

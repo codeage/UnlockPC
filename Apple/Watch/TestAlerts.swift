@@ -264,6 +264,7 @@ final class TestAlerts: NSObject, ObservableObject {
         content.title = "UnlockPC"
         content.body = "已收到电脑发送的蓝牙测试提醒。"
         content.sound = .default
+        content.interruptionLevel = .timeSensitive
         do {
             try await notificationCenter.add(
                 UNNotificationRequest(identifier: "unlockpc.\(id)", content: content, trigger: nil)
