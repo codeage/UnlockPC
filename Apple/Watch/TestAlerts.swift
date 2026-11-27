@@ -6,6 +6,8 @@ import UserNotifications
 
 @MainActor
 final class TestAlerts: NSObject, ObservableObject {
+    nonisolated static let localControlID = "unlockpc.local-notification-immediate"
+
     struct Candidate: Identifiable {
         let id: UUID
         let label: String
@@ -417,6 +419,9 @@ extension TestAlerts: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        if notification.request.identifier == Self.localControlID {
+            return [.banner, .sound, .list]
+        }
+        return [.banner, .sound]
     }
 }
