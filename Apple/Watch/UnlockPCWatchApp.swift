@@ -222,9 +222,12 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         content.body = "本地通知对照。"
         content.sound = .default
         content.interruptionLevel = .timeSensitive
+        // A fresh identifier per tap, so the system never silently replaces an already delivered one.
+        let id = TestAlerts.localControlPrefix + UUID().uuidString
         do {
-            try await center.add(UNNotificationRequest(identifier: TestAlerts.localControlID, content: content, trigger: nil))
-            UserDefaults.standard.set(requested, forKey: localControlRequestKey)
+            try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            UserDefaults.standard.set(["id": id, "requested": requested], forKey: localControlRequestKey)
+            log.notice("Local control submitted \(id, privacy: .public)")
             let elapsed = Int((Date().timeIntervalSince(requested) * 1000).rounded())
             localNotificationControlStatus = "系统已接受请求（\(elapsed) ms）"
         } catch {
@@ -233,20 +236,27 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     func readLocalNotificationControl() async {
-        guard let requested = UserDefaults.standard.object(forKey: localControlRequestKey) as? Date else {
+        guard let sample = UserDefaults.standard.dictionary(forKey: localControlRequestKey),
+              let id = sample["id"] as? String,
+              let requested = sample["requested"] as? Date else {
             localNotificationControlStatus = "还没有本地通知对照记录"
             return
         }
         let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
-        guard let delivered = notifications.first(where: {
-            $0.request.identifier == TestAlerts.localControlID && $0.date >= requested
-        }) else {
+        guard let delivered = notifications.first(where: { $0.request.identifier == id }) else {
             localNotificationControlStatus = "通知中心暂无这次投递记录"
             return
         }
-        let elapsed = Int((delivered.date.timeIntervalSince(requested) * 1000).rounded())
-        log.notice("Local control tapToDeliveryMs=\(elapsed)")
-        localNotificationControlStatus = "点击 → 系统投递 \(elapsed) ms"
+        let ms = { (date: Date) in Int((date.timeIntervalSince(requested) * 1000).rounded()) }
+        var lines = ["点击 → 系统投递 \(ms(delivered.date)) ms"]
+        let present = UserDefaults.standard.dictionary(forKey: TestAlerts.localControlWillPresentKey)
+        if present?["id"] as? String == id, let presented = present?["date"] as? Date {
+            lines.append("点击 → App 收到 willPresent \(ms(presented)) ms")
+        } else {
+            lines.append("没有 willPresent 回调（App 不在前台）")
+        }
+        log.notice("Local control \(id, privacy: .public) \(lines.joined(separator: "; "), privacy: .public)")
+        localNotificationControlStatus = lines.joined(separator: "\n")
     }
 
     private func startScan() {

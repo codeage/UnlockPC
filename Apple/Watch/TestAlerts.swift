@@ -6,7 +6,8 @@ import UserNotifications
 
 @MainActor
 final class TestAlerts: NSObject, ObservableObject {
-    nonisolated static let localControlID = "unlockpc.local-notification-immediate"
+    nonisolated static let localControlPrefix = "unlockpc.local-notification-immediate."
+    nonisolated static let localControlWillPresentKey = "broadcastWakeTest.localControlWillPresent"
 
     struct Candidate: Identifiable {
         let id: UUID
@@ -420,7 +421,12 @@ extension TestAlerts: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        if notification.request.identifier == Self.localControlID {
+        let id = notification.request.identifier
+        if id.hasPrefix(Self.localControlPrefix) {
+            // Separates "system delivered" from "app was asked to present" for the timing readout.
+            UserDefaults.standard.set(["id": id, "date": Date()], forKey: Self.localControlWillPresentKey)
+            Logger(subsystem: "com.bytereset.unlockpc.watchkitapp", category: "TestAlerts")
+                .notice("Local control willPresent \(id, privacy: .public)")
             return [.banner, .sound, .list]
         }
         return [.banner, .sound]
