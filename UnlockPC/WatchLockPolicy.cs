@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace UnlockPC;
 
@@ -7,7 +7,7 @@ internal sealed class WatchLockPolicy
     private static readonly TimeSpan WeakWindow = TimeSpan.FromSeconds(18);
     private static readonly TimeSpan WeakGap = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan WeakSampleAge = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan RequiredIdle = TimeSpan.FromSeconds(10);
+    internal static readonly TimeSpan RequiredIdle = TimeSpan.FromSeconds(15);
     private readonly Queue<WatchSignalSample> _weak = new();
     private readonly Queue<long> _strong = new();
     private WatchRuleSettings _rules = new();

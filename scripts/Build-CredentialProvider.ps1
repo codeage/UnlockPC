@@ -1,10 +1,20 @@
-[CmdletBinding()]
-param([string]$VisualStudioPath)
+﻿[CmdletBinding()]
+param([string]$VisualStudioPath, [switch]$SelfTest)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root 'CredentialProvider\Provider.cpp'
 $output = Join-Path $root 'CredentialProvider\bin\x64\Release'
+$file = 'UnlockPCCredentialProvider.dll'
+$compilerOptions = '/LD'
+$linkerOptions = '/EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE'
+if ($SelfTest) {
+    $source = Join-Path $root 'CredentialProvider\ProviderSelfTest.cpp'
+    $output = Join-Path $root 'CredentialProvider\bin\x64\SelfTest'
+    $file = 'ProviderSelfTest.exe'
+    $compilerOptions = ''
+    $linkerOptions = ''
+}
 if (-not $VisualStudioPath) {
     $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
     $VisualStudioPath = & $locator -latest -prerelease -products '*' -property installationPath
@@ -20,7 +30,7 @@ if (-not (Test-Path -LiteralPath $environment)) {
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 Push-Location -LiteralPath $output
 try {
-    $build = "`"$environment`" && cl.exe /nologo /std:c++17 /W4 /WX /O2 /MT /GS /guard:cf /LD /DUNICODE /D_UNICODE `"$source`" /link /WX /guard:cf /OUT:UnlockPCCredentialProvider.dll /EXPORT:DllGetClassObject,PRIVATE /EXPORT:DllCanUnloadNow,PRIVATE Ole32.lib Advapi32.lib Credui.lib Secur32.lib Shlwapi.lib Wtsapi32.lib User32.lib Uuid.lib"
+    $build = "`"$environment`" && cl.exe /nologo /std:c++17 /W4 /WX /O2 /MT /GS /guard:cf $compilerOptions /DUNICODE /D_UNICODE `"$source`" /link /WX /guard:cf /OUT:$file $linkerOptions Ole32.lib Advapi32.lib Credui.lib Secur32.lib Shlwapi.lib Wtsapi32.lib User32.lib Uuid.lib"
     $start = [Diagnostics.ProcessStartInfo]::new($env:ComSpec, "/d /s /c `"$build`"")
     $start.WorkingDirectory = $output
     $start.UseShellExecute = $false
@@ -30,7 +40,7 @@ try {
         if ($compiler.ExitCode -ne 0) { throw "凭据提供程序构建失败（$($compiler.ExitCode)）。" }
     }
     finally { $compiler.Dispose() }
-    Get-Item -LiteralPath (Join-Path $output 'UnlockPCCredentialProvider.dll')
+    Get-Item -LiteralPath (Join-Path $output $file)
 }
 finally {
     Pop-Location

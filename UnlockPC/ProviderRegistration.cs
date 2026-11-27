@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -14,18 +14,29 @@ internal static class ProviderRegistration
     private const string ComKey = $@"SOFTWARE\Classes\CLSID\{ProviderId}\InprocServer32";
     private static string SourceDll => Path.Combine(AppContext.BaseDirectory, "UnlockPCCredentialProvider.dll");
 
-    public static bool IsInstalled() => GetInstalledPath() is not null;
+    private const string DomainSupportPath = "UnlockPC.DomainSupportPath";
 
-    private static string? GetInstalledPath()
+    public static bool IsInstalled(bool requireDomainSupport = false) => GetInstalledPath(requireDomainSupport) is not null;
+
+    private static string? GetInstalledPath(bool requireDomainSupport = false)
     {
         using var provider = Registry.LocalMachine.OpenSubKey(ProviderKey);
         using var server = Registry.LocalMachine.OpenSubKey(ComKey);
-        return provider is not null && server?.GetValue("") is string path && File.Exists(path) ? path : null;
+        return GetInstalledPath(provider is not null, server?.GetValue("") as string,
+            requireDomainSupport ? server?.GetValue(DomainSupportPath) as string : null, requireDomainSupport, File.Exists);
     }
 
-    public static async Task<bool> EnsureInstalledAsync()
+    internal static string? GetInstalledPath(bool providerRegistered, string? path, string? domainSupportPath,
+        bool requireDomainSupport, Func<string, bool> fileExists)
     {
-        if (IsInstalled())
+        return providerRegistered && path is not null && fileExists(path) &&
+            (!requireDomainSupport || string.Equals(domainSupportPath, path, StringComparison.OrdinalIgnoreCase))
+            ? path : null;
+    }
+
+    public static async Task<bool> EnsureInstalledAsync(bool requireDomainSupport = false)
+    {
+        if (IsInstalled(requireDomainSupport))
             return true;
 
         if (!File.Exists(SourceDll))
@@ -41,7 +52,7 @@ internal static class ProviderRegistration
         {
             using var installer = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动登录组件安装程序。");
             await installer.WaitForExitAsync();
-            if (installer.ExitCode != 0 || !IsInstalled())
+            if (installer.ExitCode != 0 || !IsInstalled(requireDomainSupport))
                 throw new InvalidOperationException($"Windows 登录组件安装失败（0x{installer.ExitCode:X8}）。");
 
             return true;
@@ -65,7 +76,12 @@ internal static class ProviderRegistration
                 using var installed = File.OpenRead(currentDll);
                 using var source = File.OpenRead(SourceDll);
                 if (SHA256.HashData(installed).AsSpan().SequenceEqual(SHA256.HashData(source)))
+                {
+                    using var registration = Registry.LocalMachine.OpenSubKey(ComKey, writable: true)
+                        ?? throw new IOException("Windows 登录组件注册已变更。");
+                    registration.SetValue(DomainSupportPath, currentDll, RegistryValueKind.String);
                     return 0;
+                }
             }
 
             string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
@@ -84,6 +100,7 @@ internal static class ProviderRegistration
             using (var server = Registry.LocalMachine.CreateSubKey(ComKey))
             {
                 server.SetValue("ThreadingModel", "Apartment", RegistryValueKind.String);
+                server.SetValue(DomainSupportPath, installedDll, RegistryValueKind.String);
                 server.SetValue("", installedDll, RegistryValueKind.String);
             }
             using var provider = Registry.LocalMachine.CreateSubKey(ProviderKey);

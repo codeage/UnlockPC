@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml.Controls;
@@ -13,8 +13,8 @@ public sealed partial class MainWindow
         int currentRound = 0;
         try
         {
-            DirectUnlock.VerifyAccount();
-            if (!ProviderRegistration.IsInstalled())
+            bool domainAccount = DirectUnlock.VerifyAccount();
+            if (!ProviderRegistration.IsInstalled(domainAccount))
                 throw new InvalidOperationException("请先在 UnlockPC 中安装 Windows 登录组件。");
             if (!await WaitForSelfTestAsync(() => WindowRootGrid.XamlRoot is not null))
                 throw new InvalidOperationException("测试窗口未加载。");
@@ -87,7 +87,13 @@ public sealed partial class MainWindow
                 double lockedWaitMs = Stopwatch.GetElapsedTime(lockedAt, requestedAt).TotalMilliseconds;
                 BluetoothLog.Write("lock_cycle_unlock_requested", new { round, lockedWaitMs, status });
 
-                if (!await WaitForSelfTestAsync(() => watcher.LastUnlockNotification >= requestedAt, timeoutSeconds: 15))
+                if (!await WaitForSelfTestAsync(() =>
+                {
+                    if (watcher.LastUnlockNotification >= requestedAt)
+                        return true;
+                    watcher.Update(Stopwatch.GetTimestamp(), 0, interrupted: false);
+                    return false;
+                }, timeoutSeconds: 15))
                 {
                     string reason = broker.LastCredentialSent >= requestedAt
                         ? "Windows 登录组件已领取凭据，但未收到解锁通知。"

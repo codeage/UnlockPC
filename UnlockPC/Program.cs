@@ -36,6 +36,11 @@ internal static class Program
             Environment.ExitCode = WatchLockPolicySelfTest.Run();
             return;
         }
+        if (args is ["--domain-unlock-self-test"])
+        {
+            Environment.ExitCode = DomainUnlockSelfTest.Run();
+            return;
+        }
         if (args is ["--ui-self-test", "advanced-options" or "watch-broadcast" or "watch-encryption"])
         {
             Environment.ExitCode = 1;

@@ -1,18 +1,14 @@
 ﻿using System.Diagnostics;
-using System.Net;
-using System.Net.Http.Json;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using UnlockPC;
 
 internal static class Program
 {
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Length != 4 || !Regex.IsMatch(args[1], @"\A[A-Z0-9]{10}\z"))
+        if (args.Length != 4)
         {
             Console.Error.WriteLine("Usage: WatchPushTest <APNs .p8 file> <key ID> <Watch device token file> <new JSONL log>");
             return 1;
@@ -20,23 +16,10 @@ internal static class Program
 
         try
         {
-            var deviceToken = File.ReadAllText(args[2]).Trim();
-            if (deviceToken.Length == 0 || deviceToken.Length % 2 != 0 || !deviceToken.All(Uri.IsHexDigit))
-                throw new InvalidDataException("Invalid Watch device token.");
-
-            using var signingKey = ECDsa.Create();
-            signingKey.ImportFromPem(File.ReadAllText(args[0]));
-            if (signingKey.KeySize != 256)
-                throw new InvalidDataException("APNs requires a P-256 signing key.");
-
-            var jwt = CreateProviderToken(signingKey, args[1]);
-            using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false })
-            {
-                Timeout = TimeSpan.FromSeconds(6)
-            };
+            using var sender = new WatchPushSender(args[0], args[1], args[2]);
             using var stream = File.Open(args[3], FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             using var log = new StreamWriter(stream) { AutoFlush = true };
-            using var watcher = new UnlockWatcher(client, jwt, deviceToken, log);
+            using var watcher = new UnlockWatcher(sender, log);
             Console.WriteLine("Listening for the next five local session unlocks. Expires after 15 minutes.");
             Application.Run();
             return watcher.ReceivedCount == 5 ? 0 : 2;
@@ -49,32 +32,13 @@ internal static class Program
         }
     }
 
-    private static string CreateProviderToken(ECDsa key, string keyId)
-    {
-        static string Encode(byte[] value) =>
-            Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-        var header = Encode(JsonSerializer.SerializeToUtf8Bytes(new { alg = "ES256", kid = keyId }));
-        var claims = Encode(JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            iss = "2NEMTTKZVN",
-            iat = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-        }));
-        var unsigned = $"{header}.{claims}";
-        var signature = key.SignData(Encoding.ASCII.GetBytes(unsigned), HashAlgorithmName.SHA256,
-            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-        return $"{unsigned}.{Encode(signature)}";
-    }
-
     private sealed class UnlockWatcher : NativeWindow, IDisposable
     {
         private const int SessionChangeMessage = 0x02B1;
         private const int SessionUnlock = 8;
         private const int SampleCount = 5;
         private readonly int sessionId;
-        private readonly HttpClient client;
-        private readonly string jwt;
-        private readonly Uri endpoint;
+        private readonly WatchPushSender sender;
         private readonly StreamWriter log;
         private readonly System.Windows.Forms.Timer expiry = new() { Interval = 15 * 60 * 1000 };
         private int completed;
@@ -82,14 +46,12 @@ internal static class Program
 
         public int ReceivedCount { get; private set; }
 
-        public UnlockWatcher(HttpClient client, string jwt, string deviceToken, StreamWriter log)
+        public UnlockWatcher(WatchPushSender sender, StreamWriter log)
         {
             using var process = Process.GetCurrentProcess();
             sessionId = process.SessionId;
-            this.client = client;
-            this.jwt = jwt;
+            this.sender = sender;
             this.log = log;
-            endpoint = new Uri($"https://api.push.apple.com/3/device/{deviceToken}");
             CreateHandle(new CreateParams());
             if (!WTSRegisterSessionNotification(Handle, 0))
             {
@@ -129,37 +91,8 @@ internal static class Program
         {
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
-                {
-                    Version = HttpVersion.Version20,
-                    VersionPolicy = HttpVersionPolicy.RequestVersionExact,
-                    Content = JsonContent.Create(new
-                    {
-                        aps = new
-                        {
-                            alert = new { title = "UnlockPC", body = $"Windows 解锁测试 {sequence}/{SampleCount}" },
-                            sound = "default"
-                        },
-                        unlockpcTestEvent = eventId,
-                        unlockUtc
-                    })
-                };
-                request.Headers.TryAddWithoutValidation("authorization", $"bearer {jwt}");
-                request.Headers.Add("apns-topic", "com.bytereset.unlockpc.watchkitapp");
-                request.Headers.Add("apns-push-type", "alert");
-                request.Headers.Add("apns-priority", "10");
-                request.Headers.Add("apns-expiration", "0");
-                request.Headers.Add("apns-id", eventId.ToString());
-                using var response = await client.SendAsync(request);
-                var responseMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-                string? reason = null;
-                if (!response.IsSuccessStatusCode)
-                {
-                    using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-                    if (body.RootElement.TryGetProperty("reason", out var value))
-                        reason = value.GetString();
-                }
-                Record(new { stage = "apns", sequence, eventId, responseMs, status = (int)response.StatusCode, reason });
+                var response = await sender.SendAsync(eventId, unlockUtc, started, $"Windows 解锁测试 {sequence}/{SampleCount}");
+                Record(new { stage = "apns", sequence, eventId, responseMs = response.ResponseMs, status = response.Status, reason = response.Reason });
             }
             catch (Exception error)
             {

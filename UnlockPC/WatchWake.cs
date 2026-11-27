@@ -16,7 +16,9 @@ internal sealed class WatchWake : IDisposable
     private const nuint PowerResume = 0x0012;
     private const nuint SubclassId = 2;
     private const int WtsSessionInfoEx = 25;
+    private const uint DisplayRequired = 0x00000002; // ES_DISPLAY_REQUIRED
     private static readonly Guid DisplayStatus = new("2b84c20e-ad23-4ddf-93db-05ffbd7efca5");
+    private static readonly TimeSpan DisplayWakeTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan UnlockObservation = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan LockRetryInterval = TimeSpan.FromSeconds(10);
     private readonly nint _window;
@@ -42,12 +44,13 @@ internal sealed class WatchWake : IDisposable
     private bool? _locked;
     private long? _lockedAt;
     private bool _immediateSamples;
-    private bool _displayOff;
+    private bool? _displayOff;
     private string? _wakeResult;
     private long _lastWake;
     private bool _directAttempted;
     private CancellationTokenSource? _verificationCancellation;
     private (Task<WatchConnectionVerificationResult> Task, WatchSignalDecision Signal)? _pendingVerification;
+    private (long RequestedAt, WatchSignalDecision Signal, WatchConnectionVerificationResult? Connection)? _pendingDisplayWake;
     private long _lockRequestedAt;
     private bool _automaticLockPending;
     private bool _activityInProgress;
@@ -214,11 +217,11 @@ internal sealed class WatchWake : IDisposable
             _wakeResult = null;
         }
 
-        if (_approach.Update(now, nearSample) && _displayOff)
+        if (_approach.Update(now, nearSample) && _displayOff == true)
         {
             // Reset the display idle timer once. Windows owns the lock screen and authentication.
             RecordActivity(LockActivityPhase.Start, "手表靠近，开始亮屏解锁流程。");
-            bool requested = SetThreadExecutionState(0x00000002) != 0; // ES_DISPLAY_REQUIRED
+            bool requested = SetThreadExecutionState(DisplayRequired) != 0;
             _lastWake = requested ? now : 0;
             _wakeResult = requested ? "已请求亮屏，等待 Windows 登录。" : "Windows 未接受亮屏请求。";
             BluetoothLog.Write("watch_wake_requested", new { requested });
@@ -344,7 +347,27 @@ internal sealed class WatchWake : IDisposable
             var connection = verification.Task.Result;
             RecordActivity(LockActivityPhase.Step, connection == WatchConnectionVerificationResult.AlreadyConnected
                 ? "Windows 确认配对手表已连接。" : "配对手表的新链路加密验证通过。");
-            return OfferUnlock(now, directUnlock, verification.Signal, connection);
+            return WakeDisplayForUnlock(now, directUnlock, verification.Signal, connection);
+        }
+        if (_pendingDisplayWake is { } displayWake)
+        {
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(displayWake.RequestedAt, now);
+            if (_displayOff == false && elapsed < DisplayWakeTimeout)
+            {
+                _pendingDisplayWake = null;
+                BluetoothLog.Write("direct_unlock_display_ready", new { elapsedMs = elapsed.TotalMilliseconds });
+                RecordActivity(LockActivityPhase.Step, "Windows 已确认亮屏。");
+                return OfferUnlock(now, directUnlock, displayWake.Signal, displayWake.Connection);
+            }
+            if (elapsed >= DisplayWakeTimeout)
+            {
+                _pendingDisplayWake = null;
+                BluetoothLog.Write("direct_unlock_display_timeout", new { elapsedMs = elapsed.TotalMilliseconds, displayOff = _displayOff });
+                _wakeResult = "未收到 Windows 亮屏确认，请手动解锁。";
+                FinishActivity(_wakeResult);
+                return _wakeResult;
+            }
+            return "已请求 Windows 亮屏，正在等待确认。";
         }
         if (_directAttempted)
         {
@@ -415,7 +438,27 @@ internal sealed class WatchWake : IDisposable
             }
             return "已锁屏。正在验证手表的蓝牙连接。";
         }
-        return OfferUnlock(now, directUnlock, matched);
+        return WakeDisplayForUnlock(now, directUnlock, matched);
+    }
+
+    private string WakeDisplayForUnlock(long now, DirectUnlock directUnlock, WatchSignalDecision matched,
+        WatchConnectionVerificationResult? connection = null)
+    {
+        bool requested = SetThreadExecutionState(DisplayRequired) != 0;
+        BluetoothLog.Write("direct_unlock_display_requested", new { requested, displayOff = _displayOff });
+        if (_displayOff == false)
+            return OfferUnlock(now, directUnlock, matched, connection);
+        if (!requested)
+        {
+            _wakeResult = "Windows 未接受亮屏请求，请手动解锁。";
+            FinishActivity(_wakeResult);
+            return _wakeResult;
+        }
+
+        _pendingDisplayWake = (now, matched, connection);
+        _wakeResult = "已请求 Windows 亮屏，正在等待确认。";
+        RecordActivity(LockActivityPhase.Step, _wakeResult);
+        return _wakeResult;
     }
 
     private string OfferUnlock(long now, DirectUnlock directUnlock, WatchSignalDecision matched,
@@ -434,8 +477,6 @@ internal sealed class WatchWake : IDisposable
                 connectionVerification = connection?.ToString(),
                 encryptedConnectionVerified = connection == WatchConnectionVerificationResult.NewlyEncrypted, _rules.UnlockDelaySeconds
             });
-            if (_displayOff)
-                SetThreadExecutionState(0x00000002); // ES_DISPLAY_REQUIRED
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -448,6 +489,7 @@ internal sealed class WatchWake : IDisposable
 
     private void CancelAuthentication()
     {
+        _pendingDisplayWake = null;
         _pendingVerification = null;
         _verificationCancellation?.Cancel();
         _verificationCancellation?.Dispose();
@@ -618,9 +660,12 @@ internal sealed class WatchWake : IDisposable
             // POWERBROADCAST_SETTING stores a GUID, a DWORD length, then the data bytes.
             if (Marshal.PtrToStructure<Guid>(lParam) == DisplayStatus && Marshal.ReadInt32(lParam, 16) == sizeof(int))
             {
-                bool wasOff = _displayOff;
-                _displayOff = Marshal.ReadInt32(lParam, 20) == 0;
-                if (wasOff && !_displayOff && _lastWake != 0)
+                int state = Marshal.ReadInt32(lParam, 20);
+                bool? wasOff = _displayOff;
+                _displayOff = state switch { 0 => true, 1 or 2 => false, _ => null };
+                if (wasOff != _displayOff)
+                    BluetoothLog.Write("watch_wake_display_state_changed", new { state, locked = _locked });
+                if (wasOff == true && _displayOff == false && (_lastWake != 0 || _pendingDisplayWake is not null))
                     BluetoothLog.Write("watch_wake_display_on");
             }
         }

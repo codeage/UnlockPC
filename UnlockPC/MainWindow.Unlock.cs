@@ -254,9 +254,9 @@ public sealed partial class MainWindow
         UpdateWatchManagement();
         try
         {
-            DirectUnlock.VerifyAccount();
+            bool domainAccount = DirectUnlock.VerifyAccount();
             bool shouldEnable = enableAutoUnlock || _watchRules.AutoUnlock;
-            bool installProvider = !ProviderRegistration.IsInstalled();
+            bool installProvider = !ProviderRegistration.IsInstalled(domainAccount);
             using var identity = WindowsIdentity.GetCurrent();
             var password = new PasswordBox { Header = "Windows 登录密码", MaxLength = 255 };
             var error = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };
@@ -264,7 +264,7 @@ public sealed partial class MainWindow
                 ? "Windows 未接受 UnlockPC 保存的密码。请输入当前密码以恢复自动解锁。"
                 : "输入当前 Windows 账户的登录密码。验证后，UnlockPC 会为当前用户加密保存。";
             if (installProvider)
-                instructions += "\n\n首次设置时，Windows 会要求管理员确认安装登录组件。";
+                instructions += "\n\n设置时，Windows 会要求管理员确认安装或更新登录组件。";
             if (enableAutoUnlock)
                 instructions += "\n\n蓝牙信号无法确认手表是否佩戴，也无法防止广播重放。";
 
@@ -319,8 +319,8 @@ public sealed partial class MainWindow
 
             if (installProvider)
             {
-                DirectUnlockStatus.Text = "等待 Windows 确认安装登录组件…";
-                if (!await ProviderRegistration.EnsureInstalledAsync() || _isClosing)
+                DirectUnlockStatus.Text = "等待 Windows 确认安装或更新登录组件…";
+                if (!await ProviderRegistration.EnsureInstalledAsync(domainAccount) || _isClosing)
                     return;
             }
 

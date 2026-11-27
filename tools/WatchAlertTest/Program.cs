@@ -14,7 +14,8 @@ catch (Exception error)
 using (publisher)
 {
     publisher.StateChanged += (_, _) =>
-        Console.WriteLine($"GATT advertising: {publisher.AdvertisementStatus}, subscribers: {publisher.SubscriberCount}");
+        Console.WriteLine($"GATT advertising: {publisher.AdvertisementStatus} ({publisher.AdvertisementError}), subscribers: {publisher.SubscriberCount}");
+    Console.WriteLine($"GATT advertising: {publisher.AdvertisementStatus}; compatibility: {publisher.UsesCompatibilityService}; subscribers: {publisher.SubscriberCount}");
     Console.WriteLine("Select this PC on the Watch. Enter = send, D = send after 15 seconds, Q = quit.");
     while (Console.ReadLine() is { } line)
     {

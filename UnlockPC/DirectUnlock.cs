@@ -22,30 +22,38 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
 
     internal long LastCredentialSent => Interlocked.Read(ref _lastCredentialSent);
 
-    private static (string Username, uint Session) GetLocalAccount(WindowsIdentity identity)
+    private static (string Username, string Domain, uint Session) GetConsoleAccount(WindowsIdentity identity)
     {
-        string[] account = identity.Name.Split('\\', 2);
-        if (account.Length != 2 || !account[0].Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("当前版本仅支持本机 Windows 账户。");
-
         using var process = Process.GetCurrentProcess();
-        uint session = (uint)process.SessionId;
-        if (WTSGetActiveConsoleSessionId() != session)
-            throw new InvalidOperationException("请从本机控制台开启此功能。");
-
-        return (account[1], session);
+        return GetConsoleAccount(identity.Name, identity.User, Environment.MachineName,
+            (uint)process.SessionId, WTSGetActiveConsoleSessionId());
     }
 
-    public static void VerifyAccount()
+    internal static (string Username, string Domain, uint Session) GetConsoleAccount(
+        string identityName, SecurityIdentifier? sid, string machineName, uint session, uint consoleSession)
+    {
+        string[] account = identityName.Split('\\', 2);
+        if (account.Length != 2 || string.IsNullOrEmpty(account[0]) || string.IsNullOrEmpty(account[1]) ||
+            sid?.IsAccountSid() != true)
+            throw new InvalidOperationException("密码式自动解锁仅支持 Windows 本机或 Active Directory 域账户。");
+
+        if (consoleSession != session)
+            throw new InvalidOperationException("请从本机控制台开启此功能。");
+
+        string domain = account[0].Equals(machineName, StringComparison.OrdinalIgnoreCase) ? "." : account[0];
+        return (account[1], domain, session);
+    }
+
+    public static bool VerifyAccount()
     {
         using var identity = WindowsIdentity.GetCurrent();
-        GetLocalAccount(identity);
+        return GetConsoleAccount(identity).Domain != ".";
     }
 
     public static unsafe DirectUnlock? Prompt(nint window)
     {
         using var identity = WindowsIdentity.GetCurrent();
-        var (account, session) = GetLocalAccount(identity);
+        var (account, domain, session) = GetConsoleAccount(identity);
 
         var prompt = new CredentialUiInfo
         {
@@ -67,7 +75,7 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
                 if (result != 0)
                     throw new Win32Exception(result);
 
-                ValidateAndProtect(account, identity, buffer);
+                ValidateAndProtect(account, domain, identity, buffer);
             }
 
             keepProtectedPassword = true;
@@ -86,13 +94,13 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
             throw new InvalidOperationException("请输入当前 Windows 账户的密码。");
 
         using var identity = WindowsIdentity.GetCurrent();
-        var (account, session) = GetLocalAccount(identity);
+        var (account, domain, session) = GetConsoleAccount(identity);
         byte[] password = new byte[PasswordBytes];
         try
         {
             entered.CopyTo(MemoryMarshal.Cast<byte, char>(password.AsSpan()));
             fixed (byte* buffer = password)
-                ValidateAndProtect(account, identity, buffer);
+                ValidateAndProtect(account, domain, identity, buffer);
             return new DirectUnlock(password, session);
         }
         catch
@@ -135,12 +143,15 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
             throw new InvalidDataException("已保存的凭据格式无效。");
 
         using var identity = WindowsIdentity.GetCurrent();
-        var (account, session) = GetLocalAccount(identity);
+        var (account, domain, session) = GetConsoleAccount(identity);
+        if (domain != "." && !ProviderRegistration.IsInstalled(requireDomainSupport: true))
+            throw new InvalidOperationException("请更新 Windows 登录组件后重新启用域账户自动解锁。");
+
         byte[] password = savedPassword.ToArray();
         try
         {
             fixed (byte* buffer = password)
-                ValidateAndProtect(account, identity, buffer);
+                ValidateAndProtect(account, domain, identity, buffer);
             return new DirectUnlock(password, session);
         }
         catch
@@ -150,20 +161,31 @@ internal sealed class DirectUnlock(byte[] protectedPassword, uint session) : IDi
         }
     }
 
-    private static unsafe void ValidateAndProtect(string account, WindowsIdentity identity, byte* buffer)
+    private static unsafe void ValidateAndProtect(string account, string domain, WindowsIdentity identity, byte* buffer)
     {
-        var characters = new ReadOnlySpan<char>(buffer, PasswordCharacters);
+        ValidatePassword(account, domain, identity.User, (nint)buffer, AuthenticatePassword);
+        if (!CryptProtectMemory((nint)buffer, PasswordBytes, 0)) // SAME_PROCESS
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
+    }
+
+    internal static unsafe void ValidatePassword(string account, string domain, SecurityIdentifier? expectedSid,
+        nint buffer, Func<string, string, nint, SecurityIdentifier?> authenticate)
+    {
+        var characters = new ReadOnlySpan<char>((void*)buffer, PasswordCharacters);
         if (characters[0] == '\0' || !characters.Contains('\0'))
             throw new InvalidOperationException("需要当前 Windows 账户的密码。");
-        if (!LogonUserW(account, ".", (nint)buffer, 2, 0, out var token)) // LOGON32_LOGON_INTERACTIVE
+
+        if (expectedSid is null || !Equals(expectedSid, authenticate(account, domain, buffer)))
+            throw new InvalidOperationException("输入的密码未验证当前 Windows 账户。");
+    }
+
+    private static SecurityIdentifier? AuthenticatePassword(string account, string domain, nint buffer)
+    {
+        if (!LogonUserW(account, domain, buffer, 2, 0, out var token)) // LOGON32_LOGON_INTERACTIVE
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         using (token)
         using (var verified = new WindowsIdentity(token.DangerousGetHandle()))
-            if (!Equals(identity.User, verified.User))
-                throw new InvalidOperationException("输入的密码未验证当前 Windows 账户。");
-
-        if (!CryptProtectMemory((nint)buffer, PasswordBytes, 0)) // SAME_PROCESS
-            throw new Win32Exception(Marshal.GetLastPInvokeError());
+            return verified.User;
     }
 
     public byte[] CopyPassword()

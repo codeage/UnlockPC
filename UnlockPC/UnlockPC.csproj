@@ -27,6 +27,8 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(Configuration)' == 'Debug' and '$(ShippingBuild)' != 'true'">
     <Compile Include="..\tools\WatchAlertTest\WatchAlertTestPublisher.cs" Link="WatchAlertTestPublisher.cs" />
+    <Compile Include="..\tools\WatchAlertTest\WatchBroadcastWakeTest.cs" Link="WatchBroadcastWakeTest.cs" />
+    <Compile Include="..\tools\WatchPushTest\WatchPushSender.cs" Link="WatchPushSender.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' != 'Debug' or '$(ShippingBuild)' == 'true'">
     <Compile Remove="MainWindow.Debug.cs" />

@@ -7,9 +7,13 @@
 | `UnlockPC` | `com.bytereset.unlockpc` | 运行配套 iPhone App，归档时嵌入 Watch App |
 | `UnlockPC Watch` | `com.bytereset.unlockpc.watchkitapp` | 直接运行 Watch App，BLE 提醒链路独立于 iPhone App |
 
-两个 App 的显示名都是 **UnlockPC**。签名配置使用现有 ByteReset 团队和自动签名。分发配置拟用 SKU `UnlockPC-Watch`，TestFlight 内测组拟用 `UnlockPC Watch Internal`。
+两个 App 的显示名都是 **UnlockPC**。Xcode 真机调试使用项目团队的自动签名。
 
 正式接入 Windows 解锁流程见 [Windows 对接说明](Windows-Integration.md)。暂用 App 图标采用 Microsoft Fluent UI System Icons 的 Lock Open 图形，许可证见 [FluentIcon-LICENSE.txt](FluentIcon-LICENSE.txt)。
+
+## 编译与安装
+
+GitHub Actions 构建同时包含 iPhone App 与 Watch App 的 Release IPA。Windows 本地签名后可直装到已登记的设备，也可上传 App Store Connect 供 TestFlight 内测。完整命令、描述文件要求和设备核对步骤见 [iPhone 与 Apple Watch 编译安装](Build-and-Install.md)。
 
 ## 离线 BLE 测试提醒
 

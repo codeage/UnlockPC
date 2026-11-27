@@ -2,6 +2,8 @@
 
 Windows 11 x64 的 WinUI 3 原型，可观察 Apple Watch 的蓝牙广播。支持靠近亮屏后使用 Windows Hello，也提供使用 Windows 凭据提供程序的实验性自动解锁。
 
+iPhone 与 Apple Watch 的 GitHub 构建、Ad Hoc 直装和 TestFlight 内测流程见 [Apple 编译安装](Apple/Build-and-Install.md)。
+
 ## 构建
 
 在安装了 .NET 10 SDK、PowerShell 7 和 Visual Studio C++ 桌面开发工具（含 Windows SDK）的 Windows 上运行：
@@ -15,6 +17,10 @@ dotnet build UnlockPC.slnx -c Release -p:Platform=x64
 构建前会停止 UnlockPC IRK 服务，构建成功后会安装或更新服务并启动一次。首次安装、变更授权用户或更新服务程序时需要管理员确认。服务设为手动启动，构建时指定的 Windows 用户可启动和停止该服务。应用在监测已配对手表时按需启动服务，结束监测时服务退出。只构建产物的环境可指定 `-p:DeployIrkService=false`。
 
 运行 `UnlockPC/bin/x64/Release/net10.0-windows10.0.22000.0/win-x64/UnlockPC.exe`。Release 构建会将 Windows 登录组件一起放进该目录，分发时请复制整个目录。窗口布局来自 TrayPalette/FolderTool `b9f7705`，使用随项目附带的 WinUIKit `184dc1f`。
+
+## 域账户单元测试
+
+构建 Release x64 后，运行 `pwsh -File scripts/Test-DomainUnlock.ps1` 可执行域账户解锁的代码级单元测试。测试使用模拟账户和会话数据，覆盖凭据身份、登录组件注册要求以及原生组件的会话筛选和凭据序列化。无需加入域、安装登录组件或锁屏。
 
 ## 界面自检
 
@@ -90,7 +96,7 @@ ZuUnlock 的作者确认它使用自定义 Windows Credential Provider，并要�
 
 打开 UnlockPC，在「手表管理」完成手表绑定，再开启密码式自动解锁并点击「设置解锁凭据」。首次开启时，Windows 会请求管理员确认，UnlockPC 随后自动安装登录组件。安装完成后，在 Windows 凭据窗口输入当前本机账户密码。
 
-「手表管理」可分别开启自动解锁和自动锁定。离开由持续弱信号确认。最近 18 秒内，若最新包达到 −85 dBm 或更弱，且两条这样的包相隔至少 3 秒，即可确认离开。否则需要三条 −75 dBm 或更弱的包，首尾相隔至少 6 秒。较强的包或超过 12 秒的包间隔会清除累计。自动锁屏还要求最新弱包在 5 秒内且本机已连续 10 秒无输入。长时间没有广播只会让旧样本过期。
+「手表管理」可分别开启自动解锁和自动锁定。自动锁定默认关闭。离开由持续弱信号确认。最近 18 秒内，若最新包达到 −85 dBm 或更弱，且两条这样的包相隔至少 3 秒，即可确认离开。否则需要三条 −75 dBm 或更弱的包，首尾相隔至少 6 秒。较强的包或超过 12 秒的包间隔会清除累计。自动锁屏还要求最新弱包在 5 秒内且本机已连续 15 秒无输入。长时间没有广播只会让旧样本过期。
 
 输入检测结合 Windows 会话输入、后台 Raw Input 的 HID 报告变化，以及游戏控制器状态。游戏手柄的按钮、摇杆或扳机保持在操作位置时会持续计为活动。通用 HID 设备连续发送完全相同的报告时，只记录首次收到的报告。
 

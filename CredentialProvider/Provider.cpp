@@ -1,4 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
+﻿#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <credentialprovider.h>
 #include <ntsecapi.h>
@@ -67,6 +67,15 @@ namespace
         return WaitNamedPipeW(path, 1) != FALSE;
     }
 
+    WTSINFOEX_LEVEL1_W* GetLockedAccount(WTSINFOEXW& info, DWORD session)
+    {
+        if (info.Level != 1) return nullptr;
+        auto& data = info.Data.WTSInfoExLevel1;
+        if (data.SessionId != session || data.SessionState != WTSActive ||
+            data.SessionFlags != WTS_SESSIONSTATE_LOCK || !data.UserName[0] || !data.DomainName[0]) return nullptr;
+        return &data;
+    }
+
     struct SessionInfo
     {
         LPWSTR buffer = nullptr;
@@ -77,13 +86,7 @@ namespace
             DWORD size;
             if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session, WTSSessionInfoEx, &buffer, &size) ||
                 size < sizeof(WTSINFOEXW)) return nullptr;
-            const auto info = reinterpret_cast<WTSINFOEXW*>(buffer);
-            auto& data = info->Data.WTSInfoExLevel1;
-            if (info->Level != 1 || data.SessionId != session || data.SessionState != WTSActive ||
-                data.SessionFlags != WTS_SESSIONSTATE_LOCK || !data.UserName[0] || !data.DomainName[0]) return nullptr;
-            wchar_t machine[MAX_COMPUTERNAME_LENGTH + 1];
-            DWORD length = ARRAYSIZE(machine);
-            return GetComputerNameW(machine, &length) && _wcsicmp(machine, data.DomainName) == 0 ? &data : nullptr;
+            return GetLockedAccount(*reinterpret_cast<WTSINFOEXW*>(buffer), session);
         }
     };
 
@@ -98,17 +101,33 @@ namespace
         return expected ? EqualSid(sid, expected) != FALSE : IsWellKnownSid(sid, WinLocalSystemSid) != FALSE;
     }
 
-    bool ReadPassword(DWORD session, const WTSINFOEX_LEVEL1_W& account, Secret<256>& password)
+    bool ReadSessionUserSid(DWORD session, const WTSINFOEX_LEVEL1_W& account, PSID sid, DWORD sidLength)
     {
+        // The session token identifies the logged-on user even when their domain controller is unavailable.
+        Handle token;
+        if (WTSQueryUserToken(session, &token.value))
+        {
+            alignas(TOKEN_USER) BYTE storage[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE];
+            DWORD size;
+            return GetTokenInformation(token.value, TokenUser, storage, sizeof storage, &size) &&
+                CopySid(sidLength, sid, reinterpret_cast<TOKEN_USER*>(storage)->User.Sid);
+        }
+
         wchar_t qualified[ARRAYSIZE(account.DomainName) + ARRAYSIZE(account.UserName) + 1];
         if (swprintf_s(qualified, L"%s\\%s", account.DomainName, account.UserName) < 0) return false;
-        alignas(DWORD) BYTE sid[SECURITY_MAX_SID_SIZE];
-        DWORD sidLength = sizeof sid;
         wchar_t domain[ARRAYSIZE(account.DomainName)];
         DWORD domainLength = ARRAYSIZE(domain);
         SID_NAME_USE type;
-        if (!LookupAccountNameW(nullptr, qualified, sid, &sidLength, domain, &domainLength, &type) || type != SidTypeUser)
-            return false;
+        return LookupAccountNameW(nullptr, qualified, sid, &sidLength, domain, &domainLength, &type) && type == SidTypeUser;
+    }
+
+    bool ReadPassword(DWORD session, const WTSINFOEX_LEVEL1_W& account, Secret<256>& password)
+    {
+        alignas(DWORD) BYTE sid[SECURITY_MAX_SID_SIZE];
+        if (!ReadSessionUserSid(session, account, sid, sizeof sid)) return false;
+        alignas(DWORD) BYTE domainSid[SECURITY_MAX_SID_SIZE];
+        DWORD domainSidLength = sizeof domainSid;
+        if (!GetWindowsAccountDomainSid(sid, domainSid, &domainSidLength)) return false;
 
         wchar_t path[64];
         PipeName(session, path);
@@ -143,7 +162,33 @@ namespace
             std::wmemchr(password.text, L'\0', ARRAYSIZE(password.text));
     }
 
-    bool PackCredential(LONG attempt, CREDENTIAL_PROVIDER_USAGE_SCENARIO scenario, WTSINFOEX_LEVEL1_W& account,
+    bool SerializeLogon(CREDENTIAL_PROVIDER_USAGE_SCENARIO scenario, const WTSINFOEX_LEVEL1_W& account,
+        const wchar_t* protectedPassword, ULONG package, CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION& result)
+    {
+        const size_t domainLength = wcslen(account.DomainName) * sizeof(wchar_t);
+        const size_t userLength = wcslen(account.UserName) * sizeof(wchar_t);
+        const size_t passwordLength = wcslen(protectedPassword) * sizeof(wchar_t);
+        const size_t capacityBytes = sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) + domainLength + userLength + passwordLength;
+        auto buffer = static_cast<BYTE*>(CoTaskMemAlloc(capacityBytes));
+        if (!buffer) return false;
+        auto& logon = *reinterpret_cast<KERB_INTERACTIVE_UNLOCK_LOGON*>(buffer);
+        logon = {};
+        logon.Logon.MessageType = scenario == CPUS_UNLOCK_WORKSTATION ? KerbWorkstationUnlockLogon : KerbInteractiveLogon;
+        size_t offset = sizeof logon;
+        auto append = [&](UNICODE_STRING& destination, const wchar_t* text, size_t bytes)
+        {
+            memcpy(buffer + offset, text, bytes);
+            destination = { static_cast<USHORT>(bytes), static_cast<USHORT>(bytes), reinterpret_cast<PWSTR>(offset) };
+            offset += bytes;
+        };
+        append(logon.Logon.LogonDomainName, account.DomainName, domainLength);
+        append(logon.Logon.UserName, account.UserName, userLength);
+        append(logon.Logon.Password, protectedPassword, passwordLength);
+        result = {package, ProviderId, static_cast<ULONG>(capacityBytes), buffer};
+        return true;
+    }
+
+    bool PackCredential(LONG attempt, CREDENTIAL_PROVIDER_USAGE_SCENARIO scenario, const WTSINFOEX_LEVEL1_W& account,
         Secret<256>& password, CREDENTIAL_PROVIDER_CREDENTIAL_SERIALIZATION& result)
     {
         HANDLE lsa;
@@ -173,31 +218,9 @@ namespace
             return false;
         }
 
-        const size_t domainLength = wcslen(account.DomainName) * sizeof(wchar_t);
-        const size_t userLength = wcslen(account.UserName) * sizeof(wchar_t);
-        const size_t passwordLength = wcslen(protectedPassword.text) * sizeof(wchar_t);
-        const size_t capacityBytes = sizeof(KERB_INTERACTIVE_UNLOCK_LOGON) + domainLength + userLength + passwordLength;
-        auto buffer = static_cast<BYTE*>(CoTaskMemAlloc(capacityBytes));
-        if (!buffer)
-        {
-            LogCredentialEvent(attempt, scenario, L"serialization_allocation_failed", ERROR_OUTOFMEMORY);
-            return false;
-        }
-        auto& logon = *reinterpret_cast<KERB_INTERACTIVE_UNLOCK_LOGON*>(buffer);
-        logon = {};
-        logon.Logon.MessageType = scenario == CPUS_UNLOCK_WORKSTATION ? KerbWorkstationUnlockLogon : KerbInteractiveLogon;
-        size_t offset = sizeof logon;
-        auto append = [&](UNICODE_STRING& destination, const wchar_t* text, size_t bytes)
-        {
-            memcpy(buffer + offset, text, bytes);
-            destination = { static_cast<USHORT>(bytes), static_cast<USHORT>(bytes), reinterpret_cast<PWSTR>(offset) };
-            offset += bytes;
-        };
-        append(logon.Logon.LogonDomainName, account.DomainName, domainLength);
-        append(logon.Logon.UserName, account.UserName, userLength);
-        append(logon.Logon.Password, protectedPassword.text, passwordLength);
-        result = {package, ProviderId, static_cast<ULONG>(capacityBytes), buffer};
-        return true;
+        if (SerializeLogon(scenario, account, protectedPassword.text, package, result)) return true;
+        LogCredentialEvent(attempt, scenario, L"serialization_allocation_failed", ERROR_OUTOFMEMORY);
+        return false;
     }
 
     class Credential final : public ICredentialProviderCredential
@@ -264,7 +287,7 @@ namespace
             auto account = info.Read(session);
             if (!account)
             {
-                LogCredentialEvent(attempt, scenario, L"locked_local_account_unavailable");
+                LogCredentialEvent(attempt, scenario, L"locked_account_unavailable");
                 return S_OK;
             }
             Secret<256> password;

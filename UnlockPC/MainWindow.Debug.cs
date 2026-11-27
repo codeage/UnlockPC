@@ -177,7 +177,7 @@ public sealed partial class MainWindow
         _weakRssiBox.Value = _watchRules.WeakRssi;
         _veryWeakRssiBox.Value = _watchRules.VeryWeakRssi;
         _debugLockRuleDescription.Text = $"在 18 秒内，至少收到两条间隔达到 3 秒的极弱广播（≤ {_watchRules.VeryWeakRssi} dBm），" +
-            $"或至少三条首尾间隔达到 6 秒的弱广播（≤ {_watchRules.WeakRssi} dBm），且本机连续 10 秒无输入，才会请求锁屏。";
+            $"或至少三条首尾间隔达到 6 秒的弱广播（≤ {_watchRules.WeakRssi} dBm），且本机连续 {WatchLockPolicy.RequiredIdle.TotalSeconds:0} 秒无输入，才会请求锁屏。";
     }
 
     partial void SyncDebugRuleStatus()

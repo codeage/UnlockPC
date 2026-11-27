@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace UnlockPC;
 
@@ -26,8 +26,8 @@ internal static class WatchLockPolicySelfTest
             Check(!Observe(policy, false, 11, (11, -75)), "two ordinary weak packets");
             Check(Observe(policy, false, 14, (14, -75)), "three ordinary weak packets over six seconds");
             Check(!Observe(policy, false, 14.5, (14.5, -50)), "strong recovery clears departure");
-            Check(!WatchLockPolicy.InputAllowsLock(null) && !WatchLockPolicy.InputAllowsLock(TimeSpan.FromSeconds(9.99)) &&
-                WatchLockPolicy.InputAllowsLock(TimeSpan.FromSeconds(10)), "input idle boundary");
+            Check(!WatchLockPolicy.InputAllowsLock(null) && !WatchLockPolicy.InputAllowsLock(TimeSpan.FromSeconds(14.99)) &&
+                WatchLockPolicy.InputAllowsLock(TimeSpan.FromSeconds(15)), "input idle boundary");
 
             policy.Reset(At(0));
             Check(!Observe(policy, true, 1, (1, -45)), "manual lock with watch nearby");
