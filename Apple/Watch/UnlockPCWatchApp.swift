@@ -53,6 +53,18 @@ private struct WatchHomeView: View {
                         Text(timing)
                     }
                 }
+                Section("本地通知对照") {
+                    Button("15 秒后发本地通知") {
+                        Task { await broadcast.scheduleLocalNotificationControl() }
+                    }
+                    .disabled(broadcast.schedulingLocalControl)
+                    Button("查看本地通知时间") {
+                        Task { await broadcast.readLocalNotificationControl() }
+                    }
+                    if let status = broadcast.localNotificationControlStatus {
+                        Text(status)
+                    }
+                }
                 Section("APNs 实测") {
                     Text(push.status)
                     Button("注册推送") {
@@ -103,6 +115,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private let log = Logger(subsystem: "com.bytereset.unlockpc.watchkitapp", category: "BroadcastWakeTest")
     private let armedPIDKey = "broadcastWakeTest.armedPID"
     private let notificationTimingKey = "broadcastWakeTest.notificationTiming"
+    private let localControlTargetKey = "broadcastWakeTest.localControlTarget"
+    private let localControlID = "unlockpc.local-notification-control"
     private let pid = ProcessInfo.processInfo.processIdentifier
     private var central: CBCentralManager!
     private var peer: CBPeripheral?
@@ -115,6 +129,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     @Published private(set) var armed = false
     @Published private(set) var status = "等待布防"
     @Published private(set) var notificationTiming: String?
+    @Published private(set) var schedulingLocalControl = false
+    @Published private(set) var localNotificationControlStatus: String?
 
     override init() {
         super.init()
@@ -189,6 +205,51 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         let submitToDelivery = Int((notification.date.timeIntervalSince(submitted) * 1000).rounded())
         log.notice("Notification timing \(id, privacy: .public) receiveToSubmitMs=\(receiveToSubmit) submitToDeliveryMs=\(submitToDelivery)")
         notificationTiming = "收包 → 提交成功 \(receiveToSubmit) ms\n提交成功 → 系统投递 \(submitToDelivery) ms"
+    }
+
+    func scheduleLocalNotificationControl() async {
+        guard !schedulingLocalControl else { return }
+        schedulingLocalControl = true
+        defer { schedulingLocalControl = false }
+        let center = UNUserNotificationCenter.current()
+        guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else {
+            localNotificationControlStatus = "请在系统设置中开启通知"
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "UnlockPC"
+        content.body = "本地通知对照。"
+        content.sound = .default
+        let delay: TimeInterval = 15
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+        let target = Date().addingTimeInterval(delay)
+        do {
+            try await center.add(UNNotificationRequest(identifier: localControlID, content: content, trigger: trigger))
+            UserDefaults.standard.set(target, forKey: localControlTargetKey)
+            localNotificationControlStatus = "预定 \(target.formatted(date: .omitted, time: .standard))。请按表冠回表盘。"
+        } catch {
+            localNotificationControlStatus = "本地通知提交失败"
+        }
+    }
+
+    func readLocalNotificationControl() async {
+        guard let target = UserDefaults.standard.object(forKey: localControlTargetKey) as? Date else {
+            localNotificationControlStatus = "还没有本地通知对照记录"
+            return
+        }
+        let planned = target.formatted(date: .omitted, time: .standard)
+        let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
+        guard let delivered = notifications.first(where: {
+            $0.request.identifier == localControlID && $0.date >= target.addingTimeInterval(-1)
+        }) else {
+            localNotificationControlStatus = "预定 \(planned)\n通知中心暂无这次投递记录"
+            return
+        }
+        let recorded = delivered.date.formatted(date: .omitted, time: .standard)
+        let delay = Int((delivered.date.timeIntervalSince(target) * 1000).rounded())
+        log.notice("Local control targetToDeliveryMs=\(delay)")
+        localNotificationControlStatus = "预定 \(planned)\n系统投递 \(recorded)（\(delay) ms）"
     }
 
     private func startScan() {
