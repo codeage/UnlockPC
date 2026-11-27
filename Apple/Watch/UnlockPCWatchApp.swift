@@ -65,6 +65,14 @@ private struct WatchHomeView: View {
                         Text(status)
                     }
                 }
+                Section("直接震动对照") {
+                    Button("立即震动") {
+                        broadcast.playDirectHaptic(reason: "button")
+                    }
+                    if let status = broadcast.directHapticStatus {
+                        Text(status)
+                    }
+                }
                 Section("APNs 实测") {
                     Text(push.status)
                     Button("注册推送") {
@@ -130,6 +138,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     @Published private(set) var notificationTiming: String?
     @Published private(set) var schedulingLocalControl = false
     @Published private(set) var localNotificationControlStatus: String?
+    @Published private(set) var directHapticStatus: String?
 
     override init() {
         super.init()
@@ -259,6 +268,19 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         localNotificationControlStatus = lines.joined(separator: "\n")
     }
 
+    func playDirectHaptic(reason: String) {
+        let state: String
+        switch WKApplication.shared().applicationState {
+        case .active: state = "active"
+        case .inactive: state = "inactive"
+        case .background: state = "background"
+        @unknown default: state = "unknown"
+        }
+        WKInterfaceDevice.current().play(.notification)
+        log.notice("Direct haptic played state=\(state, privacy: .public): \(reason, privacy: .public)")
+        directHapticStatus = "最近一次直接震动：\(Date().formatted(date: .omitted, time: .standard))（\(state)）"
+    }
+
     private func startScan() {
         if armed && peer == nil && central.state == .poweredOn && !central.isScanning {
             central.scanForPeripherals(withServices: [serviceID])
@@ -367,6 +389,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             return
         }
         log.notice("Received \(token.uuidString, privacy: .public) pid=\(self.pid, privacy: .public) restarted=\(restarted, privacy: .public)")
+        // Direct haptic bypasses the notification presentation path; it may be ignored in the background.
+        playDirectHaptic(reason: "broadcast \(token.uuidString)")
         Task {
             let content = UNMutableNotificationContent()
             content.title = "UnlockPC"
