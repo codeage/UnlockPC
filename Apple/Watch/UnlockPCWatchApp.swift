@@ -147,6 +147,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private let pid = ProcessInfo.processInfo.processIdentifier
     private var central: CBCentralManager!
     private var peer: CBPeripheral?
+    /// Connections cancelled at the end of an exchange whose disconnect callback has not arrived yet.
+    private var cancelling = Set<UUID>()
     private var processing = false
     private var exchange = 0
     private var exchangeTimeout: Task<Void, Never>?
@@ -316,14 +318,14 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     private func finishExchange(_ message: String) {
-        exchangeTimeout?.cancel()
         status = armed ? "\(message)。仍在布防，等待下一条。" : message
-        processing = false
         if let peer, peer.state != .disconnected {
+            // The disconnect callback can arrive much later, or never if the app is suspended first;
+            // scan again now so a scan request is always pending while armed.
+            cancelling.insert(peer.identifier)
             central.cancelPeripheralConnection(peer)
-        } else {
-            resumeScan()
         }
+        resumeScan()
     }
 
     private func resumeScan() {
@@ -371,6 +373,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        // A late callback for an already finished exchange must not abort a new one with the same computer.
+        if cancelling.remove(peripheral.identifier) != nil, peer?.state != .disconnected { return }
         if peripheral.identifier == peer?.identifier { resumeScan() }
     }
 
