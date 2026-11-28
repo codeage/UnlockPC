@@ -3,6 +3,7 @@ import UserNotifications
 import WatchConnectivity
 import WatchKit
 @preconcurrency import CoreBluetooth
+import CoreLocation
 import OSLog
 
 @main
@@ -11,10 +12,11 @@ struct UnlockPCWatchApp: App {
     @WKApplicationDelegateAdaptor private var push: WatchPushTest
     @StateObject private var alerts = TestAlerts()
     @StateObject private var broadcast = BroadcastWakeTest()
+    @StateObject private var keepAlive = KeepAliveMonitor()
 
     var body: some Scene {
         WindowGroup {
-            WatchHomeView(alerts: alerts, push: push, broadcast: broadcast)
+            WatchHomeView(alerts: alerts, push: push, broadcast: broadcast, keepAlive: keepAlive)
                 .task {
                     let center = UNUserNotificationCenter.current()
                     if await center.notificationSettings().authorizationStatus == .notDetermined {
@@ -37,6 +39,7 @@ private struct WatchHomeView: View {
     @ObservedObject var alerts: TestAlerts
     @ObservedObject var push: WatchPushTest
     @ObservedObject var broadcast: BroadcastWakeTest
+    @ObservedObject var keepAlive: KeepAliveMonitor
 
     var body: some View {
         NavigationStack {
@@ -63,6 +66,16 @@ private struct WatchHomeView: View {
                     }
                     if let status = broadcast.localNotificationControlStatus {
                         Text(status)
+                    }
+                }
+                Section("定位保活与电量") {
+                    Text(keepAlive.status)
+                    Text("电量记录 \(keepAlive.rowCount) 条")
+                    Button("导出电量记录") {
+                        push.exportBatteryLog(keepAlive.logURL)
+                    }
+                    Button("清空电量记录", role: .destructive) {
+                        keepAlive.clearLog()
                     }
                 }
                 Section("直接震动对照") {
@@ -110,9 +123,16 @@ private struct WatchHomeView: View {
         .onAppear {
             alerts.setBroadcastTestActive(broadcast.armed)
             alerts.setForeground(scenePhase == .active)
+            keepAlive.setEnabled(broadcast.armed)
         }
-        .onChange(of: scenePhase) { alerts.setForeground($0 == .active) }
-        .onChange(of: broadcast.armed) { alerts.setBroadcastTestActive($0) }
+        .onChange(of: scenePhase) {
+            alerts.setForeground($0 == .active)
+            keepAlive.record($0 == .active ? "foreground" : $0 == .background ? "background" : "inactive")
+        }
+        .onChange(of: broadcast.armed) {
+            alerts.setBroadcastTestActive($0)
+            keepAlive.setEnabled($0)
+        }
     }
 }
 
@@ -421,10 +441,187 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 }
 
+/// Keeps the app running in the background with low-accuracy location while the broadcast test is armed,
+/// and logs battery level once a minute. Gaps between "tick" rows show when the app was suspended.
+@MainActor
+private final class KeepAliveMonitor: NSObject, ObservableObject, CLLocationManagerDelegate {
+    let logURL = URL.documentsDirectory.appending(path: "battery-log.csv")
+    private let header = "time,uptimeSec,batteryPct,batteryState,keepAlive,locationUpdates,appState,gapSec,event\n"
+    private let log = Logger(subsystem: "com.bytereset.unlockpc.watchkitapp", category: "KeepAlive")
+    private let manager = CLLocationManager()
+    private var backgroundActivity: AnyObject?
+    private var wanted = false
+    private var running = false
+    private var locationUpdates = 0
+    private var lastTick: Date?
+
+    @Published private(set) var status = "未布防，定位保活关闭"
+    @Published private(set) var rowCount = 0
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        // Only the background runtime matters here, not the position.
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        manager.distanceFilter = kCLDistanceFilterNone
+        WKInterfaceDevice.current().isBatteryMonitoringEnabled = true
+        rowCount = max(0, ((try? String(contentsOf: logURL, encoding: .utf8))?
+            .split(separator: "\n").count ?? 1) - 1)
+        record("launch")
+        Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+                self?.record("tick")
+            }
+        }
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        wanted = enabled
+        enabled ? start() : stop()
+    }
+
+    private func start() {
+        guard wanted, !running else { return }
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            status = "等待定位授权"
+            manager.requestWhenInUseAuthorization()
+            return
+        case .denied, .restricted:
+            status = "定位权限未开启，无法保活"
+            record("locationDenied")
+            return
+        default:
+            break
+        }
+        manager.allowsBackgroundLocationUpdates = true
+        manager.startUpdatingLocation()
+        if #available(watchOS 10.0, *) {
+            backgroundActivity = CLBackgroundActivitySession()
+        }
+        running = true
+        status = "定位保活已开启"
+        record("keepAliveOn")
+        log.notice("Keep-alive started")
+    }
+
+    private func stop() {
+        guard running else { return }
+        manager.stopUpdatingLocation()
+        manager.allowsBackgroundLocationUpdates = false
+        if #available(watchOS 10.0, *) {
+            (backgroundActivity as? CLBackgroundActivitySession)?.invalidate()
+        }
+        backgroundActivity = nil
+        running = false
+        status = "未布防，定位保活关闭"
+        record("keepAliveOff")
+        log.notice("Keep-alive stopped")
+    }
+
+    func record(_ event: String) {
+        let now = Date()
+        let device = WKInterfaceDevice.current()
+        let battery = device.batteryLevel < 0 ? "" : String(format: "%.0f", device.batteryLevel * 100)
+        let charge: String
+        switch device.batteryState {
+        case .charging: charge = "charging"
+        case .full: charge = "full"
+        case .unplugged: charge = "unplugged"
+        default: charge = "unknown"
+        }
+        let app: String
+        switch WKApplication.shared().applicationState {
+        case .active: app = "active"
+        case .inactive: app = "inactive"
+        case .background: app = "background"
+        @unknown default: app = "unknown"
+        }
+        let gap = event == "tick" ? lastTick.map { String(format: "%.0f", now.timeIntervalSince($0)) } ?? "" : ""
+        if event == "tick" || event == "launch" { lastTick = now }
+        let row = [
+            now.ISO8601Format(), String(format: "%.0f", ProcessInfo.processInfo.systemUptime), battery, charge,
+            running ? "1" : "0", String(locationUpdates), app, gap, event,
+        ].joined(separator: ",") + "\n"
+        locationUpdates = 0
+        append(row)
+    }
+
+    func clearLog() {
+        try? FileManager.default.removeItem(at: logURL)
+        rowCount = 0
+        lastTick = nil
+        record("cleared")
+    }
+
+    private func append(_ row: String) {
+        do {
+            if !FileManager.default.fileExists(atPath: logURL.path) {
+                try Data(header.utf8).write(to: logURL)
+            }
+            let handle = try FileHandle(forWritingTo: logURL)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(row.utf8))
+            rowCount += 1
+        } catch {
+            log.error("Battery log write failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor in self.start() }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let count = locations.count
+        Task { @MainActor in self.locationUpdates += count }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        let message = error.localizedDescription
+        Task { @MainActor in self.log.error("Location error: \(message, privacy: .public)") }
+    }
+}
+
 @MainActor
 private final class WatchPushTest: NSObject, ObservableObject, WKApplicationDelegate, WCSessionDelegate {
     @Published private(set) var status = "点按注册，准备 Windows 解锁实测"
     private var pendingToken: String?
+    private var pendingBatteryLog: URL?
+
+    func exportBatteryLog(_ url: URL) {
+        guard WCSession.isSupported(), FileManager.default.fileExists(atPath: url.path) else {
+            status = "还没有电量记录"
+            return
+        }
+        // Send a snapshot so later appends don't race the transfer.
+        let snapshot = FileManager.default.temporaryDirectory.appending(path: "battery-log-\(UUID().uuidString).csv")
+        do {
+            try FileManager.default.copyItem(at: url, to: snapshot)
+        } catch {
+            status = "电量记录复制失败"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            pendingBatteryLog = snapshot
+            session.delegate = self
+            session.activate()
+            status = "正在连接 iPhone，随后导出电量记录"
+            return
+        }
+        session.transferFile(snapshot, metadata: ["unlockpcWatchBatteryLog": true])
+        status = "已开始把电量记录传到 iPhone"
+    }
+
+    private func flushBatteryLog() {
+        guard let pending = pendingBatteryLog, WCSession.default.activationState == .activated else { return }
+        pendingBatteryLog = nil
+        WCSession.default.transferFile(pending, metadata: ["unlockpcWatchBatteryLog": true])
+        status = "已开始把电量记录传到 iPhone"
+    }
 
     func register() async {
         do {
@@ -483,7 +680,17 @@ private final class WatchPushTest: NSObject, ObservableObject, WKApplicationDele
                 status = "配对连接失败：\(failure)"
             } else {
                 forwardToken()
+                flushBatteryLog()
             }
+        }
+    }
+
+    nonisolated func session(_ session: WCSession, didFinish fileTransfer: WCSessionFileTransfer, error: (any Error)?) {
+        guard fileTransfer.file.metadata?["unlockpcWatchBatteryLog"] != nil else { return }
+        let failure = error?.localizedDescription
+        try? FileManager.default.removeItem(at: fileTransfer.file.fileURL)
+        Task { @MainActor in
+            status = failure.map { "电量记录传输失败：\($0)" } ?? "电量记录已送达 iPhone"
         }
     }
 

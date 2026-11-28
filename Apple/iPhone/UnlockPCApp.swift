@@ -67,6 +67,21 @@ private final class WatchPushExport: NSObject, ObservableObject, WCSessionDelega
         }
     }
 
+    nonisolated func session(_ session: WCSession, didReceive file: WCSessionFile) {
+        guard file.metadata?["unlockpcWatchBatteryLog"] != nil else { return }
+        // The received file is deleted when this method returns, so copy it synchronously.
+        let message: String
+        do {
+            let data = try Data(contentsOf: file.fileURL)
+            let target = URL.documentsDirectory.appending(path: "UnlockPC-Watch-Battery.csv")
+            try data.write(to: target, options: [.atomic, .completeFileProtection])
+            message = "手表电量记录已就绪"
+        } catch {
+            message = "电量记录保存失败：\(error.localizedDescription)"
+        }
+        Task { @MainActor in status = message }
+    }
+
     nonisolated private func receive(_ context: [String: Any]) {
         guard let token = context["unlockpcWatchPushToken"] as? String,
               !token.isEmpty, token.count.isMultiple(of: 2),
