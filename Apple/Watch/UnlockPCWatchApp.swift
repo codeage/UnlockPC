@@ -49,12 +49,6 @@ private struct WatchHomeView: View {
                         Task { await broadcast.toggle() }
                     }
                     Text(broadcast.status)
-                    Button("查看通知延迟") {
-                        Task { await broadcast.readNotificationTiming() }
-                    }
-                    if let timing = broadcast.notificationTiming {
-                        Text(timing)
-                    }
                 }
                 Section("本地通知对照") {
                     Button("立即发本地通知") {
@@ -142,7 +136,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private let eventID = CBUUID(string: "D037E925-FA37-4F34-B1C5-46A2484A4810")
     private let log = Logger(subsystem: "com.bytereset.unlockpc.watchkitapp", category: "BroadcastWakeTest")
     private let armedPIDKey = "broadcastWakeTest.armedPID"
-    private let notificationTimingKey = "broadcastWakeTest.notificationTiming"
+    private let lastReplyPIDKey = "broadcastWakeTest.lastReplyPID"
+    private let lastHandledEventKey = "broadcastWakeTest.lastHandledEvent"
     private let localControlRequestKey = "broadcastWakeTest.localControlRequest"
     private let pid = ProcessInfo.processInfo.processIdentifier
     private var central: CBCentralManager!
@@ -151,13 +146,14 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private var cancelling = Set<UUID>()
     private var processing = false
     private var exchange = 0
-    private var exchangeTimeout: Task<Void, Never>?
+    /// Generation of the main-queue exchange timer; bumping it cancels the pending one.
+    /// Core Bluetooth also calls back on the main queue.
+    private var exchangeTimer = 0
     private var lastReplyTime: ContinuousClock.Instant?
     private var lastHandledReplyTime: ContinuousClock.Instant?
 
     @Published private(set) var armed = false
     @Published private(set) var status = "等待布防"
-    @Published private(set) var notificationTiming: String?
     @Published private(set) var schedulingLocalControl = false
     @Published private(set) var localNotificationControlStatus: String?
     @Published private(set) var directHapticStatus: String?
@@ -215,26 +211,6 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             guard exchange == initialExchange, now < deadline else { return }
             do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
         }
-    }
-
-    func readNotificationTiming() async {
-        guard let sample = UserDefaults.standard.dictionary(forKey: notificationTimingKey),
-              let id = sample["id"] as? String,
-              let received = sample["received"] as? Date,
-              let submitted = sample["submitted"] as? Date else {
-            notificationTiming = "还没有广播测试记录"
-            return
-        }
-
-        let notifications = await UNUserNotificationCenter.current().deliveredNotifications()
-        guard let notification = notifications.first(where: { $0.request.identifier == id }) else {
-            notificationTiming = "通知中心没有这次测试的记录"
-            return
-        }
-        let receiveToSubmit = Int((submitted.timeIntervalSince(received) * 1000).rounded())
-        let submitToDelivery = Int((notification.date.timeIntervalSince(submitted) * 1000).rounded())
-        log.notice("Notification timing \(id, privacy: .public) receiveToSubmitMs=\(receiveToSubmit) submitToDeliveryMs=\(submitToDelivery)")
-        notificationTiming = "收包 → 提交成功 \(receiveToSubmit) ms\n提交成功 → 系统投递 \(submitToDelivery) ms"
     }
 
     func sendLocalNotificationControl() async {
@@ -306,6 +282,21 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     private func startScan() {
         if armed && peer == nil && central.state == .poweredOn && !central.isScanning {
             central.scanForPeripherals(withServices: [serviceID])
+            log.notice("Scan started exchange=\(self.exchange)")
+        }
+    }
+
+    /// Ends the current exchange after `seconds` unless it finished earlier.
+    private func scheduleFinish(after seconds: Double, _ message: String) {
+        exchangeTimer += 1
+        let timer = exchangeTimer
+        let current = exchange
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.exchangeTimer == timer, self.exchange == current, self.peer != nil else { return }
+                self.log.notice("Exchange \(current) timer fired: \(message, privacy: .public)")
+                self.finishExchange(message)
+            }
         }
     }
 
@@ -318,6 +309,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     private func finishExchange(_ message: String) {
+        log.notice("Exchange \(self.exchange) finished: \(message, privacy: .public)")
         status = armed ? "\(message)。仍在布防，等待下一条。" : message
         if let peer, peer.state != .disconnected {
             // The disconnect callback can arrive much later, or never if the app is suspended first;
@@ -329,8 +321,7 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
     }
 
     private func resumeScan() {
-        exchangeTimeout?.cancel()
-        exchangeTimeout = nil
+        exchangeTimer += 1
         peer = nil
         processing = false
         exchange += 1
@@ -357,10 +348,8 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
         central.stopScan()
         peripheral.delegate = self
         central.connect(peripheral)
-        exchangeTimeout = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            self?.finishExchange("本次广播连接超时")
-        }
+        // Service discovery alone has taken over 4 seconds; the timer covers the whole exchange.
+        scheduleFinish(after: 10, "本次广播交换超时")
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -374,7 +363,9 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         // A late callback for an already finished exchange must not abort a new one with the same computer.
-        if cancelling.remove(peripheral.identifier) != nil, peer?.state != .disconnected { return }
+        let late = cancelling.remove(peripheral.identifier) != nil
+        log.notice("Disconnected late=\(late) current=\(peripheral.identifier == self.peer?.identifier)")
+        if late, peer?.state != .disconnected { return }
         if peripheral.identifier == peer?.identifier { resumeScan() }
     }
 
@@ -404,43 +395,28 @@ private final class BroadcastWakeTest: NSObject, ObservableObject, CBCentralMana
             return
         }
         processing = true
-        let currentExchange = exchange
-        let restarted = Int(pid) != UserDefaults.standard.integer(forKey: armedPIDKey)
+        // "New process" means this process differs from the one that sent the previous reply.
+        let previousPID = UserDefaults.standard.integer(forKey: lastReplyPIDKey)
+        let restarted = previousPID != 0 && previousPID != Int(pid)
         var reply = Data(data[2..<18])
         reply.append(restarted ? 1 : 0)
-        if UserDefaults.standard.dictionary(forKey: notificationTimingKey)?["id"] as? String == token.uuidString {
-            peripheral.writeValue(reply, for: value, type: .withResponse)
-            return
+        if UserDefaults.standard.string(forKey: lastHandledEventKey) != token.uuidString {
+            log.notice("Received \(token.uuidString, privacy: .public) pid=\(self.pid, privacy: .public) previousPid=\(previousPID) restarted=\(restarted, privacy: .public)")
+            playDirectHaptic(reason: "broadcast \(token.uuidString)")
+            UserDefaults.standard.set(token.uuidString, forKey: lastHandledEventKey)
         }
-        log.notice("Received \(token.uuidString, privacy: .public) pid=\(self.pid, privacy: .public) restarted=\(restarted, privacy: .public)")
-        // Direct haptic bypasses the notification presentation path; it may be ignored in the background.
-        playDirectHaptic(reason: "broadcast \(token.uuidString)")
-        Task {
-            let content = UNMutableNotificationContent()
-            content.title = "UnlockPC"
-            content.body = "收到 Windows 广播测试。"
-            content.sound = .default
-            content.interruptionLevel = .timeSensitive
-            do {
-                try await UNUserNotificationCenter.current().add(
-                    UNNotificationRequest(identifier: token.uuidString, content: content, trigger: nil)
-                )
-                let submitted = Date()
-                guard armed, currentExchange == exchange, processing else { return }
-                peripheral.writeValue(reply, for: value, type: .withResponse)
-                let sample: [String: Any] = ["id": token.uuidString, "received": received, "submitted": submitted]
-                UserDefaults.standard.set(sample, forKey: notificationTimingKey)
-                notificationTiming = nil
-            } catch {
-                if armed, currentExchange == exchange, processing { finishExchange("系统通知提交失败") }
-            }
-        }
+        UserDefaults.standard.set(Int(pid), forKey: lastReplyPIDKey)
+        peripheral.writeValue(reply, for: value, type: .withResponse)
+        lastReplyTime = .now
+        // The write confirmation has been seen to never arrive, which left the exchange open and the scan stopped
+        // until the 30-second ATT timeout. Give the reply a moment to go out, then end the exchange regardless.
+        scheduleFinish(after: 1, "已震动并回传结果")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        log.notice("Reply write completed error=\(error?.localizedDescription ?? "none", privacy: .public)")
         if armed, processing, peripheral.identifier == peer?.identifier, characteristic.uuid == eventID {
-            lastReplyTime = .now
-            finishExchange(error == nil ? "已提交提醒并回传结果" : "已提交提醒，回执发送失败")
+            finishExchange(error == nil ? "已震动并回传结果" : "已震动，回执发送失败")
         }
     }
 }
